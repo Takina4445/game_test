@@ -12,6 +12,7 @@
         <button class="tab-btn active" data-tab="role">角色狀態</button>
         <button class="tab-btn" data-tab="battle">戰鬥冒險</button>
         <button class="tab-btn" data-tab="dungeon">地下城</button>
+        <button class="tab-btn" data-tab="worldboss">世界BOSS</button>
         <button class="tab-btn" data-tab="bag">背包裝備</button>
         <button class="tab-btn" data-tab="craft">道具製作</button>
         <button class="tab-btn" data-tab="forge">裝備鍛造</button>
@@ -35,9 +36,15 @@
                 <select id="area-select" class="area-select" title="選擇冒險區域"></select>
                 <button id="gather-btn" class="action-btn">採集素材</button>
                 <button id="battle-btn" class="action-btn">開始戰鬥</button>
-                
-                <h2>⚔️ 戰鬥資訊</h2>
+
+                <h2>📊 戰鬥狀態</h2>
+                <div id="battle-status" class="battle-status"></div>
+
+                <h2>ℹ️ 戰鬥資訊</h2>
                 <div id="battle-info" class="battle-log"></div>
+
+                <h2>🧾 戰鬥詳細內容</h2>
+                <div id="battle-detail" class="battle-log"></div>
             </div>
             <div class="battle-right">
                 <h2>📜 戰鬥紀錄</h2>
@@ -98,7 +105,14 @@
         <div class="tab-page" id="dungeon">
             <div class="battle-left">
                 <h2>🏰 地下城（無盡層）</h2>
+                <h2>📊 戰鬥狀態</h2>
+                <div id="dungeon-status" class="battle-status"></div>
+
+                <h2>ℹ️ 戰鬥資訊</h2>
                 <div id="dungeon-info" class="battle-log"></div>
+
+                <h2>🧾 戰鬥詳細內容</h2>
+                <div id="dungeon-detail" class="battle-log"></div>
                 <button id="dungeon-fight-btn" class="action-btn">挑戰下一層</button>
                 <button id="dungeon-reset-btn" class="action-btn">重置到第1層</button>
                 <p class="hint">提示：層數越高怪物越強、掉落品質越好（更高機率掉稀有材料、更多數量）。</p>
@@ -106,6 +120,34 @@
             <div class="battle-right">
                 <h2>📜 地下城紀錄</h2>
                 <div id="dungeon-record" class="record-list"></div>
+            </div>
+        </div>
+
+        <!-- 世界BOSS頁 -->
+        <div class="tab-page" id="worldboss">
+            <div class="battle-left">
+                <h2>👑 世界BOSS</h2>
+                <p class="hint">提示：世界BOSS難度極高，設計上需要多名高級玩家協作才有機會通關。此頁為單人挑戰的「極限模式」版本。</p>
+
+                <div class="worldboss-controls">
+                    <label>選擇BOSS
+                        <select id="worldboss-select" class="area-select" title="選擇要挑戰的世界BOSS"></select>
+                    </label>
+                    <button id="worldboss-fight-btn" class="action-btn">開始挑戰</button>
+                </div>
+
+                <h2>📊 戰鬥狀態</h2>
+                <div id="worldboss-status" class="battle-status"></div>
+
+                <h2>ℹ️ 戰鬥資訊</h2>
+                <div id="worldboss-info" class="battle-log"></div>
+
+                <h2>🧾 戰鬥詳細內容</h2>
+                <div id="worldboss-detail" class="battle-log"></div>
+            </div>
+            <div class="battle-right">
+                <h2>📜 世界BOSS紀錄</h2>
+                <div id="worldboss-record" class="record-list"></div>
             </div>
         </div>
 

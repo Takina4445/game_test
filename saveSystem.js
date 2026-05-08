@@ -49,6 +49,12 @@ function getDefaultGameData() {
             bestFloor: 1,
             record: []
         },
+        worldboss: {
+            // 已通關的四天王（用 set 存 id，便於擴充）
+            cleared: [],
+            // 世界BOSS戰鬥紀錄（顯示於世界BOSS頁右側）
+            record: []
+        },
         log: []
     };
 }

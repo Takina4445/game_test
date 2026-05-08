@@ -147,6 +147,139 @@ body {
     margin-top: 10px;
 }
 
+/* 戰鬥狀態（圖像化） */
+.battle-status {
+    margin-top: 10px;
+    padding: 12px;
+    border-radius: 10px;
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(255,255,255,0.10);
+    width: 100%;
+}
+
+/* ===================== 稀有度：稀世級 / 世界級（尊貴 UI） ===================== */
+.rarity-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+.rarity-badge--relic {
+  color: #2b1a00;
+  background: linear-gradient(135deg, #ffd86a, #ff8d3b);
+  border: 1px solid rgba(255, 215, 100, 0.8);
+  box-shadow: 0 0 14px rgba(255, 166, 66, 0.35);
+}
+
+.rarity-badge--world {
+  color: #ffffff;
+  background: linear-gradient(135deg, #6e7cff, #c07cff, #49e2ff);
+  border: 1px solid rgba(180, 200, 255, 0.65);
+  box-shadow: 0 0 18px rgba(120, 170, 255, 0.45);
+}
+
+/* 用在卡片/列表上的外框尊貴效果 */
+.rarity-relic {
+  position: relative;
+  border: 1px solid rgba(255, 193, 91, 0.55) !important;
+  box-shadow: 0 0 0 1px rgba(255, 193, 91, 0.25), 0 10px 22px rgba(0, 0, 0, 0.25), 0 0 18px rgba(255, 146, 41, 0.25) !important;
+}
+
+.rarity-relic::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at 20% 10%, rgba(255, 210, 120, 0.35), transparent 55%),
+              radial-gradient(circle at 80% 90%, rgba(255, 126, 50, 0.25), transparent 55%);
+}
+
+.rarity-world {
+  position: relative;
+  border: 1px solid rgba(120, 170, 255, 0.55) !important;
+  box-shadow: 0 0 0 1px rgba(160, 200, 255, 0.25), 0 12px 26px rgba(0, 0, 0, 0.28), 0 0 22px rgba(120, 170, 255, 0.32) !important;
+}
+
+.rarity-world::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(circle at 25% 15%, rgba(120, 210, 255, 0.35), transparent 55%),
+              radial-gradient(circle at 75% 85%, rgba(210, 120, 255, 0.28), transparent 55%),
+              linear-gradient(135deg, rgba(90, 120, 255, 0.12), rgba(200, 120, 255, 0.10), rgba(80, 230, 255, 0.08));
+}
+
+.battle-status__row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.battle-status__card {
+    background: rgba(15, 52, 96, 0.65);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 10px;
+}
+
+.battle-status__title {
+    font-weight: 800;
+    margin-bottom: 8px;
+    color: rgba(255,255,255,0.95);
+}
+
+.hpbar {
+    height: 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.12);
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.10);
+}
+
+.hpbar__fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #35d07f, #e94560);
+    transition: width 0.2s ease;
+}
+
+.battle-status__meta {
+    margin-top: 8px;
+    font-size: 12px;
+    opacity: 0.92;
+    color: #c9d1ff;
+    white-space: pre-line;
+}
+
+/* 世界BOSS：控制列 */
+.worldboss-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: end;
+    margin: 8px 0 2px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: rgba(15, 52, 96, 0.40);
+    border: 1px solid rgba(255,255,255,0.10);
+}
+
+.worldboss-controls label {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    opacity: 0.95;
+}
+
 /* 背包裝備欄 */
 .bag-left, .bag-right {
     background: #16213e;

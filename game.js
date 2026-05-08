@@ -1,5 +1,87 @@
 let gameData;
 
+// ========================== 戰鬥輸出/UI 狀態（避免 renderAll 清空） ==========================
+const battleUIState = {
+    field: {
+        lastDetailHtml: "",
+        lastStatusHtml: ""
+    },
+    dungeon: {
+        lastDetailHtml: "",
+        lastStatusHtml: ""
+    },
+    worldboss: {
+        lastDetailHtml: "",
+        lastStatusHtml: ""
+    }
+};
+
+function safeSetHtml(id, html) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = String(html ?? "");
+}
+
+function pct(n, d) {
+    const dn = Math.max(1, Number(d) || 1);
+    return clamp((Number(n) || 0) / dn, 0, 1);
+}
+
+function renderBattleStatus({ mode, char, total, enemy }) {
+    // mode: 'field' | 'dungeon' | 'worldboss'
+    const key = (mode === "dungeon") ? "dungeon" : (mode === "worldboss") ? "worldboss" : "field";
+    const statusId = (mode === "dungeon") ? "dungeon-status" : (mode === "worldboss") ? "worldboss-status" : "battle-status";
+    const el = document.getElementById(statusId);
+    if (!el) return;
+
+    const charHp = Math.max(0, Number(char?.hp) || 0);
+    const charHpMax = Math.max(1, Number(total?.hpMax) || 1);
+    const enemyHp = Math.max(0, Number(enemy?.hp) || 0);
+    const enemyHpMax = enemy?.hpMax ? Math.max(1, Number(enemy.hpMax) || 1) : 1;
+    const shield = Math.max(0, Number(char?.__shield) || 0);
+
+    const html = `
+        <div class="battle-status__row">
+            <div class="battle-status__card">
+                <div class="battle-status__title">🧑 你</div>
+                <div class="hpbar" title="HP">
+                    <div class="hpbar__fill" style="width:${Math.round(pct(charHp, charHpMax) * 100)}%"></div>
+                </div>
+                <div class="battle-status__meta">HP：${charHp}/${charHpMax}${shield > 0 ? `\n護盾：${shield}` : ""}\n⚔️${total?.str ?? 0} 🛡️${total?.def ?? 0}</div>
+            </div>
+            <div class="battle-status__card">
+                <div class="battle-status__title">👾 ${enemy?.icon || ""} ${enemy?.name || "（未遭遇）"}</div>
+                <div class="hpbar" title="HP">
+                    <div class="hpbar__fill" style="width:${Math.round(pct(enemyHp, enemyHpMax) * 100)}%"></div>
+                </div>
+                <div class="battle-status__meta">HP：${enemy?.hpMax ? `${enemyHp}/${enemyHpMax}` : "—"}\n⚔️${enemy?.str ?? "—"} 🛡️${enemy?.def ?? "—"}</div>
+            </div>
+        </div>
+    `.trim();
+
+    battleUIState[key].lastStatusHtml = html;
+    el.innerHTML = html;
+}
+
+// ========================== 稀有度/尊貴 UI（稀世級/世界級） ==========================
+function getRarity(item) {
+    return item?.rarity || EQUIPMENTS?.[item?.id]?.rarity || "";
+}
+
+function getRarityClass(item) {
+    const r = getRarity(item);
+    if (r === "relic") return "rarity-relic";
+    if (r === "world") return "rarity-world";
+    return "";
+}
+
+function getRarityBadgeHtml(item) {
+    const r = getRarity(item);
+    if (r === "relic") return `<span class="rarity-badge rarity-badge--relic">稀世</span>`;
+    if (r === "world") return `<span class="rarity-badge rarity-badge--world">世界</span>`;
+    return "";
+}
+
 // ========================== UI 篩選狀態（鍛造/背包裝備） ==========================
 const uiState = {
     forgeFilter: {
@@ -410,6 +492,34 @@ const SET_EFFECTS = {
             }
         }
     }
+
+    // ====================== 世界級套裝：源初（創世神掉落） ======================
+    ,world_creator: {
+        name: "源初套裝",
+        tiers: {
+            2: {
+                desc: "戰鬥開始獲得『源初屏障』：護盾+120，並回復 25 MP。",
+                getDesc() { return "戰鬥開始獲得『源初屏障』：護盾+120，並回復 25 MP。"; },
+                battleStart(ctx) {
+                    const c = ctx.char;
+                    c.__shield = (c.__shield || 0) + 120;
+                    c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + 25);
+                    ctx.logLines?.push(addBattleLogLine("🌌 套裝：源初(2) 源初屏障（護盾+120 / MP+25）"));
+                }
+            },
+            4: {
+                desc: "攻擊時 18% 觸發『規則改寫』：追加 12% 敵人最大生命的傷害（上限 900）。",
+                getDesc() { return "攻擊時 18% 觸發『規則改寫』：追加 12% 敵人最大生命的傷害（上限 900）。"; },
+                beforePlayerAttack(ctx) {
+                    if (!ctx.enemy?.hpMax) return;
+                    if (!chance(0.18)) return;
+                    const extra = clamp(Math.floor(ctx.enemy.hpMax * 0.12), 1, 900);
+                    ctx.damage = (ctx.damage || 0) + extra;
+                    ctx.logLines?.push(addBattleLogLine(`🌌 套裝：源初(4) 規則改寫 +${extra}`));
+                }
+            }
+        }
+    }
 };
 
 function clamp(n, min, max) {
@@ -745,6 +855,93 @@ const ACCESSORY_EFFECTS = {
             ctx.toastSuffix = (ctx.toastSuffix || "") + "（羅盤指引）";
         }
     }
+
+    // ====================== 世界BOSS掉落：稀世級飾品特效（強力，可升級） ======================
+    ,relic_titan_ward: {
+        id: "relic_titan_ward",
+        name: "泰坦護衛",
+        desc: "戰鬥開始獲得巨額護盾。",
+        getDesc(lv) {
+            const shield = scaleValue(120, lv, 0.18);
+            return `戰鬥開始獲得護盾（吸收 ${shield} 點傷害）。`;
+        },
+        battleStart(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const shield = scaleValue(120, lv, 0.18);
+            ctx.char.__shield = (ctx.char.__shield || 0) + shield;
+            ctx.logLines?.push(addBattleLogLine(`🏵️ 稀世飾品：泰坦護衛（護盾+${shield}）`));
+        }
+    }
+    ,relic_abyss_fang: {
+        id: "relic_abyss_fang",
+        name: "深淵獠牙",
+        desc: "你的吸血大幅提升。",
+        getDesc(lv) {
+            const ratio = clamp(0.22 + (lv - 1) * 0.012, 0.22, 0.45);
+            const cap = scaleValue(40, lv, 0.18);
+            return `你造成傷害的 ${Math.round(ratio * 100)}% 轉為治療（每次最多 ${cap}）。`;
+        },
+        afterPlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const ratio = clamp(0.22 + (lv - 1) * 0.012, 0.22, 0.45);
+            const cap = scaleValue(40, lv, 0.18);
+            const heal = clamp(Math.floor((ctx.damageDealt || 0) * ratio), 0, cap);
+            if (heal <= 0) return;
+            ctx.char.hp = Math.min(ctx.total.hpMax, (ctx.char.hp || 0) + heal);
+            ctx.logLines?.push(addBattleLogLine(`🏵️ 稀世飾品：深淵獠牙回復 ${heal} HP`));
+        }
+    }
+    ,relic_storm_mandate: {
+        id: "relic_storm_mandate",
+        name: "風暴敕令",
+        desc: "攻擊時高機率穿甲追加。",
+        getDesc(lv) {
+            const p = scaleChance(0.28, lv, 0.02, 0.70);
+            const ratio = clamp(0.85 + (lv - 1) * 0.04, 0.85, 1.80);
+            return `攻擊時 ${fmtPct(p)} 機率：追加相當於敵人防禦 ${Math.round(ratio * 100)}% 的傷害（穿甲）。`;
+        },
+        beforePlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.28, lv, 0.02, 0.70);
+            if (!chance(p)) return;
+            const ratio = clamp(0.85 + (lv - 1) * 0.04, 0.85, 1.80);
+            const extra = Math.max(1, Math.floor((ctx.enemy?.def || 0) * ratio));
+            ctx.damage = (ctx.damage || 0) + extra;
+            ctx.logLines?.push(addBattleLogLine(`🏵️ 稀世飾品：風暴敕令穿甲 +${extra}`));
+        }
+    }
+    ,relic_solar_respite: {
+        id: "relic_solar_respite",
+        name: "日耀喘息",
+        desc: "每場戰鬥一次致命免死，並在勝利後回復。",
+        getDesc(lv) {
+            const healHp = scaleValue(60, lv, 0.15);
+            const healMp = scaleValue(35, lv, 0.15);
+            return `每場戰鬥 1 次：受到致命傷害時保留 1HP；勝利後回復 HP+${healHp} MP+${healMp}。`;
+        },
+        battleStart(ctx) {
+            ctx.char.__solarCheatUsed = false;
+        },
+        beforeEnemyAttack(ctx) {
+            const c = ctx.char;
+            if (c.__solarCheatUsed) return;
+            const incoming = ctx.damage || 0;
+            if ((c.hp || 0) - incoming <= 0) {
+                ctx.damage = Math.max(0, (c.hp || 0) - 1);
+                c.__solarCheatUsed = true;
+                ctx.logLines?.push(addBattleLogLine("🏵️ 稀世飾品：日耀喘息（保留 1HP）"));
+            }
+        },
+        victory(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const healHp = scaleValue(60, lv, 0.15);
+            const healMp = scaleValue(35, lv, 0.15);
+            const c = ctx.char;
+            c.hp = Math.min(ctx.total.hpMax, (c.hp || 0) + healHp);
+            c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + healMp);
+            ctx.logLines?.push(addBattleLogLine(`🏵️ 稀世飾品：勝利回復 HP+${healHp} MP+${healMp}`));
+        }
+    }
 };
 
 function getSlotGroup(type) {
@@ -1039,6 +1236,82 @@ const EQUIPMENTS = {
     ,abyss_armor: { name: "深渊铠甲", type: "chest", str: 10, def: 18, hp: 40, mp: 14, icon: "🕳️", desc: "越是黑暗，越能提供保护。", setId: "abyss" }
     ,abyss_legs:  { name: "深渊护腿", type: "pants", str: 8, def: 14, hp: 34, mp: 12, icon: "👖", desc: "在绝境中仍能稳固站立。", setId: "abyss" }
     ,abyss_boots: { name: "深渊战靴", type: "shoes", str: 8, def: 12, hp: 30, mp: 12, icon: "🥾", desc: "每一步都像踩在虚无之上。", setId: "abyss" }
+
+    // ====================== 世界BOSS掉落：稀世級飾品（relic） ======================
+    ,relic_titan_ward: {
+        name: "泰坦護衛徽章",
+        type: "accessory",
+        rarity: "relic",
+        str: 8, def: 18, hp: 120, mp: 0,
+        icon: "🏵️",
+        desc: "稀世級飾品。據說是泰坦胸前碎裂後仍跳動的守護核心。",
+        effectIds: ["relic_titan_ward"]
+    }
+    ,relic_abyss_fang: {
+        name: "深淵獠牙吊墜",
+        type: "accessory",
+        rarity: "relic",
+        str: 14, def: 10, hp: 80, mp: 0,
+        icon: "🏵️",
+        desc: "稀世級飾品。每一次呼吸都像在深淵邊緣行走。",
+        effectIds: ["relic_abyss_fang"]
+    }
+    ,relic_storm_mandate: {
+        name: "風暴敕令之環",
+        type: "accessory",
+        rarity: "relic",
+        str: 18, def: 8, hp: 60, mp: 0,
+        icon: "🏵️",
+        desc: "稀世級飾品。雷律授予的敕令會撕裂一切護甲。",
+        effectIds: ["relic_storm_mandate"]
+    }
+    ,relic_solar_respite: {
+        name: "日耀喘息之印",
+        type: "accessory",
+        rarity: "relic",
+        str: 10, def: 12, hp: 90, mp: 30,
+        icon: "🏵️",
+        desc: "稀世級飾品。灼熱與慈悲共存的奇蹟之印。",
+        effectIds: ["relic_solar_respite"]
+    }
+
+    // ====================== 世界BOSS掉落：世界級套裝（world） ======================
+    ,world_creator_crown: {
+        name: "源初王冠",
+        type: "hat",
+        rarity: "world",
+        str: 40, def: 55, hp: 180, mp: 120,
+        icon: "👑",
+        desc: "世界級套裝部件。戴上它，彷彿能聽見規則被改寫的聲音。",
+        setId: "world_creator"
+    }
+    ,world_creator_mail: {
+        name: "源初神甲",
+        type: "chest",
+        rarity: "world",
+        str: 70, def: 95, hp: 360, mp: 160,
+        icon: "🌌",
+        desc: "世界級套裝部件。其上流動的光紋像宇宙般深邃。",
+        setId: "world_creator"
+    }
+    ,world_creator_legs: {
+        name: "源初護腿",
+        type: "pants",
+        rarity: "world",
+        str: 55, def: 80, hp: 280, mp: 120,
+        icon: "🌠",
+        desc: "世界級套裝部件。踏出的每一步都像跨越世界邊界。",
+        setId: "world_creator"
+    }
+    ,world_creator_boots: {
+        name: "源初行靴",
+        type: "shoes",
+        rarity: "world",
+        str: 45, def: 75, hp: 240, mp: 110,
+        icon: "🪐",
+        desc: "世界級套裝部件。行走於萬象之上。",
+        setId: "world_creator"
+    }
 };
 
 /** 套装定义：至少8套（2/4件效果） */
@@ -1097,6 +1370,15 @@ const SETS = {
         bonuses: {
             2: { str: 8, def: 6, desc: "(2) ⚔️力量+8、🛡️防御+6" },
             4: { str: 14, def: 12, hpMax: 50, mpMax: 30, desc: "(4) ⚔️力量+14、🛡️防御+12、❤️生命上限+50、💙魔力上限+30" }
+        }
+    }
+
+    // 世界級套裝：源初（創世神掉落）
+    ,world_creator: {
+        name: "源初套裝",
+        bonuses: {
+            2: { str: 45, def: 55, hpMax: 220, mpMax: 120, desc: "(2) ⚔️力量+45、🛡️防御+55、❤️生命上限+220、💙魔力上限+120" },
+            4: { str: 90, def: 110, hpMax: 480, mpMax: 260, desc: "(4) ⚔️力量+90、🛡️防御+110、❤️生命上限+480、💙魔力上限+260" }
         }
     }
 };
@@ -1372,6 +1654,7 @@ document.addEventListener("DOMContentLoaded", () => {
         initTabs();
         initEquipSlots();
         initDungeon();
+        initWorldBoss();
         renderAll();
         showToast("🎮 游戏加载完成！左右手装备独立穿脱已修复");
     } catch (e) {
@@ -1379,6 +1662,320 @@ document.addEventListener("DOMContentLoaded", () => {
         showToast("❌ 游戏加载失败");
     }
 });
+
+// ========================== 世界BOSS系統（4天王 + 創世神） ==========================
+// 設計目標：
+// - 獨立頁籤顯示與紀錄
+// - 難度極高（敘事上：10位高級玩家/50位頂尖玩家）
+// - 四天王各掉落不同「稀世級飾品(relic)」（強力特效，可用強化系統升級）
+// - 四天王全通關後解鎖「創世神(world)」，掉落「世界級套裝(world)」（超強套裝效果與數值，可升級）
+
+const WORLD_BOSSES = {
+    // 四天王
+    king_titan: {
+        id: "king_titan",
+        name: "大地天王・泰坦",
+        icon: "🗿",
+        unlock: { type: "always" },
+        desc: "巨岩化作的王者，每一步都像地鳴。難以擊穿其防禦",
+        stats: { hpMax: 15200, str: 60, def: 280 },
+        dropEquipId: "relic_titan_ward"
+    },
+    king_abyss: {
+        id: "king_abyss",
+        name: "深淵天王・噬界",
+        icon: "🕳️",
+        unlock: { type: "always" },
+        desc: "吞噬光芒的深淵意志，會在你最虛弱時撕裂防線。擁有強大的力量",
+        stats: { hpMax: 14600, str: 200, def: 70 },
+        dropEquipId: "relic_abyss_fang"
+    },
+    king_storm: {
+        id: "king_storm",
+        name: "風暴天王・雷律",
+        icon: "🌩️",
+        unlock: { type: "always" },
+        desc: "雷霆的裁決者，攻擊如暴風連綿不絕。擁有著無與倫比的攻擊能力",
+        stats: { hpMax: 8800, str: 300, def: 58 },
+        dropEquipId: "relic_storm_mandate"
+    },
+    king_solar: {
+        id: "king_solar",
+        name: "日耀天王・聖息",
+        icon: "☀️",
+        unlock: { type: "always" },
+        desc: "看似溫暖卻會灼傷一切的日耀之王。血量如同土地般厚實",
+        stats: { hpMax: 24400, str: 205, def: 62 },
+        dropEquipId: "relic_solar_respite"
+    },
+    // 創世神（四天王全通關後解鎖）
+    creator_god: {
+        id: "creator_god",
+        name: "創世神・源初",
+        icon: "🌌",
+        unlock: { type: "requireAllCleared", bossIds: ["king_titan", "king_abyss", "king_storm", "king_solar"] },
+        desc: "世界規則的締造者。無法戰勝的存在，傳說中只有遊戲開發者曾經擊敗",
+        stats: { hpMax: 26000, str: 550, def: 240 },
+        dropEquipIds: ["world_creator_crown", "world_creator_mail", "world_creator_legs", "world_creator_boots"]
+    }
+};
+
+function isWorldBossUnlocked(bossId) {
+    const b = WORLD_BOSSES[bossId];
+    if (!b) return false;
+    const u = b.unlock || { type: "always" };
+    if (u.type === "always") return true;
+    if (u.type === "requireAllCleared") {
+        const cleared = new Set(gameData?.worldboss?.cleared || []);
+        return (u.bossIds || []).every(id => cleared.has(id));
+    }
+    return false;
+}
+
+function initWorldBoss() {
+    document.getElementById("worldboss-fight-btn")?.addEventListener("click", () => {
+        worldBossFight();
+    });
+}
+
+function renderWorldBoss() {
+    const sel = document.getElementById("worldboss-select");
+    const info = document.getElementById("worldboss-info");
+    const detail = document.getElementById("worldboss-detail");
+    const record = document.getElementById("worldboss-record");
+    if (!sel || !info || !detail || !record) return;
+
+    // Select options
+    const prev = sel.value;
+    sel.innerHTML = "";
+    const bossIds = Object.keys(WORLD_BOSSES);
+    for (const id of bossIds) {
+        const b = WORLD_BOSSES[id];
+        const opt = document.createElement("option");
+        const unlocked = isWorldBossUnlocked(id);
+        opt.value = id;
+        opt.textContent = unlocked ? `${b.icon} ${b.name}` : `🔒 ${b.name}`;
+        opt.disabled = !unlocked;
+        opt.title = b.desc;
+        sel.appendChild(opt);
+    }
+    // 回填前次選擇（若仍可用）
+    if (prev && Array.from(sel.options).some(o => o.value === prev && !o.disabled)) {
+        sel.value = prev;
+    } else {
+        const firstEnabled = Array.from(sel.options).find(o => !o.disabled);
+        if (firstEnabled) sel.value = firstEnabled.value;
+    }
+
+    const selected = WORLD_BOSSES[sel.value];
+    const total = calculateTotalStats();
+    const cleared = new Set(gameData?.worldboss?.cleared || []);
+    const clearedText = ["king_titan", "king_abyss", "king_storm", "king_solar"]
+        .map(id => `${cleared.has(id) ? "✅" : "❌"} ${WORLD_BOSSES[id].name}`)
+        .join("<br>");
+
+    const dropPreview = (() => {
+        if (!selected) return "";
+        if (selected.dropEquipId) {
+            const e = EQUIPMENTS[selected.dropEquipId];
+            const badge = getRarityBadgeHtml(e);
+            return `可能掉落：${badge} ${e?.icon || ""} ${e?.name || selected.dropEquipId}`;
+        }
+        if (Array.isArray(selected.dropEquipIds)) {
+            const parts = selected.dropEquipIds.map(id => {
+                const e = EQUIPMENTS[id];
+                const badge = getRarityBadgeHtml(e);
+                return `${badge} ${e?.icon || ""} ${e?.name || id}`;
+            });
+            return `可能掉落：<br>${parts.map(x => `- ${x}`).join("<br>")}`;
+        }
+        return "";
+    })();
+
+    info.innerHTML = `
+        <div><strong>你的戰力：</strong>⚔️${total.str} 🛡️${total.def} ❤️${total.hpMax} 💙${total.mpMax}</div>
+        <div style="margin-top:8px;"><strong>四天王通關狀態</strong><br>${clearedText}</div>
+        <div style="margin-top:8px;"><strong>目標：</strong>${selected ? `${selected.icon} ${selected.name}` : "（未選擇）"}</div>
+        <div style="opacity:0.9; margin-top:4px;">${selected?.desc || ""}</div>
+        <div style="margin-top:8px; opacity:0.95;">${dropPreview}</div>
+        <div style="margin-top:8px; opacity:0.85;">提示：世界BOSS為超高難度挑戰，你可能需要透過套裝/飾品特效與強化來堆疊生存力。</div>
+    `;
+
+    // 詳細內容：避免 renderAll 時清空
+    if (battleUIState.worldboss.lastDetailHtml) {
+        detail.innerHTML = battleUIState.worldboss.lastDetailHtml;
+    } else {
+        detail.innerHTML = `<div style="opacity:0.85;">（尚無世界BOSS戰鬥詳細內容）</div>`;
+    }
+
+    // 狀態：若尚未有狀態，先渲染玩家面板
+    const status = document.getElementById("worldboss-status");
+    if (status) {
+        if (battleUIState.worldboss.lastStatusHtml) {
+            status.innerHTML = battleUIState.worldboss.lastStatusHtml;
+        } else {
+            renderBattleStatus({ mode: "worldboss", char: gameData.character, total, enemy: null });
+        }
+    }
+
+    record.innerHTML = (gameData.worldboss?.record || [])
+        .slice(0, 40)
+        .map(x => `<div>${x}</div>`)
+        .join("") || "<div>（暂无纪录）</div>";
+}
+
+function addWorldBossRecord(line) {
+    const wb = gameData.worldboss;
+    wb.record.unshift(`[${new Date().toLocaleTimeString()}] ${line}`);
+    wb.record = wb.record.slice(0, 80);
+}
+
+function addEquipmentToBag(equipId, level = 1) {
+    const inst = createEquipmentInstance(equipId, level);
+    if (!inst) return null;
+    // 確保掉落物的 effectIds/rarity 也被保留
+    const base = EQUIPMENTS[equipId] || {};
+    if (base.effectIds && !inst.effectIds) inst.effectIds = base.effectIds;
+    if (base.rarity && !inst.rarity) inst.rarity = base.rarity;
+    if (base.setId && !inst.setId) inst.setId = base.setId;
+    gameData.bag.equipments.push(inst);
+    return inst;
+}
+
+async function worldBossFight() {
+    try {
+        const sel = document.getElementById("worldboss-select");
+        const detailEl = document.getElementById("worldboss-detail");
+        if (!sel) return;
+        const id = sel.value;
+        const def = WORLD_BOSSES[id];
+        if (!def) return;
+        if (!isWorldBossUnlocked(id)) {
+            showToast("❌ 尚未解鎖此世界BOSS");
+            return;
+        }
+
+        const char = gameData.character;
+        const totalStats = calculateTotalStats();
+        const enemy = {
+            name: def.name,
+            icon: def.icon,
+            hpMax: def.stats.hpMax,
+            hp: def.stats.hpMax,
+            str: def.stats.str,
+            def: def.stats.def,
+            desc: def.desc
+        };
+
+        // 開戰事件
+        const logLines = [];
+        const startCtx = { mode: "worldboss", char, total: totalStats, enemy, logLines };
+        triggerAccessoryEvent("battleStart", startCtx);
+        triggerSetEvent("battleStart", startCtx);
+
+        let log = `👑 挑戰【${enemy.icon} ${enemy.name}】！\n${enemy.desc}`;
+        if (logLines.length) log += `\n${logLines.join("\n")}`;
+        addWorldBossRecord(`⚔️ 開始挑戰：${enemy.icon} ${enemy.name}`);
+
+        const startHtml = log.replace(/\n/g, "<br>");
+        battleUIState.worldboss.lastDetailHtml = startHtml;
+        if (detailEl) detailEl.innerHTML = startHtml;
+        renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
+
+        // 讓世界BOSS更有壓迫感：略加快節奏
+        while (char.hp > 0 && enemy.hp > 0) {
+            await new Promise(r => setTimeout(r, 550));
+
+            // 玩家出手
+            const playerCtx = { mode: "worldboss", char, total: totalStats, enemy, damage: Math.max(1, totalStats.str - enemy.def), logLines: [] };
+            triggerAccessoryEvent("beforePlayerAttack", playerCtx);
+            triggerSetEvent("beforePlayerAttack", playerCtx);
+            const playerDmg = Math.max(1, Math.floor(playerCtx.damage || 1));
+            enemy.hp -= playerDmg;
+            const afterPlayerCtx = { mode: "worldboss", char, total: totalStats, enemy, damageDealt: playerDmg, logLines: playerCtx.logLines };
+            triggerAccessoryEvent("afterPlayerAttack", afterPlayerCtx);
+            triggerSetEvent("afterPlayerAttack", afterPlayerCtx);
+            log += `\n你造成${playerDmg}点伤害（BOSS HP:${Math.max(0, enemy.hp)}/${enemy.hpMax}）`;
+            if (playerCtx.logLines.length) log += `\n${playerCtx.logLines.join("\n")}`;
+
+            if (enemy.hp > 0) {
+                // BOSS出手（更殘酷的傷害模型：先基礎，再套事件，再護盾）
+                const baseEnemyDmg = Math.max(1, enemy.str - totalStats.def);
+                const enemyCtx = { mode: "worldboss", char, total: totalStats, enemy, damage: baseEnemyDmg, logLines: [] };
+                triggerAccessoryEvent("beforeEnemyAttack", enemyCtx);
+                triggerSetEvent("beforeEnemyAttack", enemyCtx);
+                let enemyDmg = Math.max(0, Math.floor(enemyCtx.damage || 0));
+
+                if ((char.__shield || 0) > 0 && enemyDmg > 0) {
+                    const absorb = Math.min(char.__shield, enemyDmg);
+                    char.__shield -= absorb;
+                    enemyDmg -= absorb;
+                    enemyCtx.logLines.push(addBattleLogLine(`🛡️ 護盾吸收 ${absorb} 伤害（剩余护盾 ${char.__shield}）`));
+                }
+
+                char.hp -= enemyDmg;
+                const afterEnemyCtx = { mode: "worldboss", char, total: totalStats, enemy, damageDealt: enemyDmg, logLines: enemyCtx.logLines };
+                triggerAccessoryEvent("afterEnemyAttack", afterEnemyCtx);
+                triggerSetEvent("afterEnemyAttack", afterEnemyCtx);
+                log += `\n${enemy.name}造成${enemyDmg}点伤害（你的HP:${Math.max(0, char.hp)}/${totalStats.hpMax}）`;
+                if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
+            }
+
+            const stepHtml = log.replace(/\n/g, "<br>");
+            battleUIState.worldboss.lastDetailHtml = stepHtml;
+            if (detailEl) detailEl.innerHTML = stepHtml;
+            renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
+        }
+
+        if (char.hp <= 0) {
+            log += "\n💀 你被世界BOSS击败了！（HP保留为1）";
+            char.hp = 1;
+            showToast("💀 世界BOSS挑战失败");
+            addWorldBossRecord(`❌ 挑戰失敗：${enemy.icon} ${enemy.name}`);
+        } else {
+            log += "\n🏆 你擊敗了世界BOSS！（單人奇蹟）";
+            showToast("🏆 世界BOSS通關！");
+            addWorldBossRecord(`✅ 通關：${enemy.icon} ${enemy.name}`);
+
+            // 標記通關（四天王才計入 cleared）
+            if (id.startsWith("king_")) {
+                if (!gameData.worldboss.cleared.includes(id)) gameData.worldboss.cleared.push(id);
+            }
+
+            // 掉落
+            const dropLines = [];
+            if (def.dropEquipId) {
+                const it = addEquipmentToBag(def.dropEquipId, 1);
+                if (it) {
+                    dropLines.push(`掉落：${getRarityBadgeHtml(it)} ${it.icon || ""} ${it.name} [+${it.level}]`);
+                }
+            }
+            if (Array.isArray(def.dropEquipIds)) {
+                // 創世神：必掉一件世界套裝（隨機），並小機率加倍
+                const pick = def.dropEquipIds[Math.floor(Math.random() * def.dropEquipIds.length)];
+                const it = addEquipmentToBag(pick, 1);
+                if (it) dropLines.push(`掉落：${getRarityBadgeHtml(it)} ${it.icon || ""} ${it.name} [+${it.level}]`);
+                if (chance(0.10)) {
+                    const pick2 = def.dropEquipIds[Math.floor(Math.random() * def.dropEquipIds.length)];
+                    const it2 = addEquipmentToBag(pick2, 1);
+                    if (it2) dropLines.push(`✨ 額外掉落：${getRarityBadgeHtml(it2)} ${it2.icon || ""} ${it2.name} [+${it2.level}]`);
+                }
+            }
+            if (dropLines.length) log += `\n${dropLines.join("\n")}`;
+        }
+
+        const finalHtml = log.replace(/\n/g, "<br>");
+        battleUIState.worldboss.lastDetailHtml = finalHtml;
+        if (detailEl) detailEl.innerHTML = finalHtml;
+        renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
+
+        renderAll();
+        saveGame();
+    } catch (e) {
+        console.error(e);
+        showToast("❌ 世界BOSS戰鬥異常");
+    }
+}
 
 /** 修复旧存档：补全所有缺失的装备栏/字段 */
 function repairOldSave() {
@@ -1395,6 +1992,11 @@ function repairOldSave() {
     if (gameData.dungeon.floor === undefined) gameData.dungeon.floor = 1;
     if (gameData.dungeon.bestFloor === undefined) gameData.dungeon.bestFloor = 1;
     if (!Array.isArray(gameData.dungeon.record)) gameData.dungeon.record = [];
+
+    // 世界BOSS：舊存檔補欄位
+    if (!gameData.worldboss) gameData.worldboss = defaultData.worldboss;
+    if (!Array.isArray(gameData.worldboss.cleared)) gameData.worldboss.cleared = [];
+    if (!Array.isArray(gameData.worldboss.record)) gameData.worldboss.record = [];
 }
 
 // ========================== UI核心功能 ==========================
@@ -1427,6 +2029,7 @@ function renderAll() {
         renderRole();
         renderBattle();
         renderDungeon();
+        renderWorldBoss();
         renderBag();
         renderCraft();
         renderForge();
@@ -1464,6 +2067,27 @@ function renderDungeon() {
         <div style="margin-top:8px; opacity:0.9;">你的当前战力：⚔️${total.str} 🛡️${total.def} ❤️${total.hpMax} 💙${total.mpMax}</div>
         <div style="margin-top:8px; opacity:0.9;">提示：每5层会明显提升掉落数量与稀有素材出现率。</div>
     `;
+
+    // 地下城：詳細內容（避免 renderAll 時被清空）
+    const detail = document.getElementById("dungeon-detail");
+    if (detail) {
+        if (battleUIState.dungeon.lastDetailHtml) {
+            detail.innerHTML = battleUIState.dungeon.lastDetailHtml;
+        } else {
+            detail.innerHTML = `<div style="opacity:0.85;">（尚無地下城戰鬥詳細內容）</div>`;
+        }
+    }
+
+    // 地下城：狀態（若尚未有狀態，先渲染玩家面板）
+    const status = document.getElementById("dungeon-status");
+    if (status) {
+        if (battleUIState.dungeon.lastStatusHtml) {
+            status.innerHTML = battleUIState.dungeon.lastStatusHtml;
+        } else {
+            renderBattleStatus({ mode: "dungeon", char: gameData.character, total, enemy: null });
+        }
+    }
+
     record.innerHTML = (d.record || []).slice(0, 30).map(x => `<div>${x}</div>`).join("") || "<div>（暂无纪录）</div>";
 }
 
@@ -1546,7 +2170,8 @@ async function dungeonFight() {
 
         const char = gameData.character;
         const totalStats = calculateTotalStats();
-        const battleInfo = document.getElementById("dungeon-info");
+        const battleInfo = document.getElementById("dungeon-info"); // 保留給地城資訊（層數/戰力等）
+        const battleDetail = document.getElementById("dungeon-detail");
 
         // 飾品/套裝：地下城戰鬥開始事件
         const logLines = [];
@@ -1557,7 +2182,11 @@ async function dungeonFight() {
         let log = `🏰 第${floor}层遭遇【${enemy.icon || ""} ${enemy.name}】！\n${enemy.desc || ""}`;
         if (logLines.length) log += `\n${logLines.join("\n")}`;
         d.record.unshift(`[${new Date().toLocaleTimeString()}] ${log}`);
-        battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+
+        const startHtml = log.replace(/\n/g, "<br>");
+        battleUIState.dungeon.lastDetailHtml = startHtml;
+        if (battleDetail) battleDetail.innerHTML = startHtml;
+        renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
 
         while (char.hp > 0 && enemy.hp > 0) {
             await new Promise(resolve => setTimeout(resolve, 650));
@@ -1596,7 +2225,10 @@ async function dungeonFight() {
                 log += `\n${enemy.name}造成${enemyDmg}点伤害（你的HP:${Math.max(0, char.hp)}/${totalStats.hpMax}）`;
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
-            battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+            const stepHtml = log.replace(/\n/g, "<br>");
+            battleUIState.dungeon.lastDetailHtml = stepHtml;
+            if (battleDetail) battleDetail.innerHTML = stepHtml;
+            renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
         }
 
         if (char.hp <= 0) {
@@ -1644,7 +2276,12 @@ async function dungeonFight() {
             d.record.unshift(`[${new Date().toLocaleTimeString()}] ✅ 通关第${floor}层 → 前往第${d.floor}层`);
         }
 
-        battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+        const finalHtml = log.replace(/\n/g, "<br>");
+        battleUIState.dungeon.lastDetailHtml = finalHtml;
+        if (battleDetail) battleDetail.innerHTML = finalHtml;
+        renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
+
+        // dungeon-info 維持顯示層數/戰力（renderDungeon 會更新）；這裡不覆蓋成戰鬥 log
         // 限制纪录长度，避免存档膨胀
         d.record = (d.record || []).slice(0, 60);
         renderAll();
@@ -1782,7 +2419,8 @@ function renderEquipSlots() {
         if (dom) {
             if (item) {
                 const icon = getEquipIcon(item);
-                dom.innerHTML = `${icon} ${item.name}<br>[+${item.level || 1}]`;
+                const badge = getRarityBadgeHtml(item);
+                dom.innerHTML = `${badge} ${icon} ${item.name}<br>[+${item.level || 1}]`;
                 dom.title = getEquipDesc(item) || item.name;
             } else {
                 dom.innerHTML = "空";
@@ -1797,6 +2435,13 @@ function takeOffEquip(slotName) {
         if (!gameData.equipped[slotName]) return;
         const item = gameData.equipped[slotName];
         gameData.equipped[slotName] = null;
+
+        // 飾品：卸下回背包時，將 type 重設為「accessory」（背包用群組型別）
+        // 否則若保留 accessory1~5，下一次穿戴會被綁死同一格，造成明明有空欄位卻頂替。
+        if (String(slotName).startsWith("accessory")) {
+            item.type = "accessory";
+        }
+
         gameData.bag.equipments.push(item);
         showToast(`🎽 脱下【${item.name}】成功！`);
         renderAll();
@@ -1854,7 +2499,7 @@ function renderBag() {
         }
         html += `</div></div>`;
 
-        // 装备（卡片化 + 篩選）
+        // 裝備（卡片化 + 篩選 + 稀有度尊貴UI）
         html += `<div class="bag-section">`;
         html += `<div class="bag-section__title">📌 裝備（右手=武器 / 左手=盾牌）</div>`;
         html += `<div class="bag-list">`;
@@ -1892,6 +2537,8 @@ function renderBag() {
                 const slotType = item.type === "rightHand" ? "右手" : item.type === "leftHand" ? "左手" : (SLOT_LABELS[getSlotGroup(item.type)] || item.type);
                 const icon = getEquipIcon(item);
                 const desc = getEquipDesc(item);
+                const rarityCls = getRarityClass(item);
+                const badge = getRarityBadgeHtml(item);
                 const statsText = `⚔️+${item.str || 0} 🛡️+${item.def || 0} ❤️+${item.hp || 0} 💙+${item.mp || 0}`;
                 const specialText = getItemSpecialEffectText(item);
                 const setName = item.setId ? getSetName(item.setId) : "";
@@ -1903,9 +2550,9 @@ function renderBag() {
                 ].filter(Boolean).join("\n");
 
                 html += `
-                    <div class="bag-item">
+                    <div class="bag-item ${rarityCls}">
                         <div>
-                            <div class="bag-item__name">${icon} ${item.name} [+${item.level || 1}]</div>
+                            <div class="bag-item__name">${badge} ${icon} ${item.name} [+${item.level || 1}]</div>
                             <div class="bag-item__meta">${metaLines}</div>
                         </div>
                         <div class="bag-item__actions">
@@ -1958,12 +2605,17 @@ function equipItem(index) {
         const item = equipments[index];
         if (!item || !item.type) return;
 
-        // 飾品特例：允許 type="accessory"，自動放到第一個空的飾品欄位（accessory1~5）
-        // 若全滿，則替換 accessory1。
-        if (item.type === "accessory") {
+        // 飾品特例：背包中可能是 type="accessory"（新規格）
+        // 或舊資料/某些流程殘留 type="accessory1~5"。
+        // 穿戴時一律視為「飾品群組」：優先塞到第一個空的飾品欄位。
+        // 若全滿：不允許穿戴（不替換），跳提示。
+        if (String(item.type) === "accessory" || String(item.type).startsWith("accessory")) {
             const slots = ["accessory1","accessory2","accessory3","accessory4","accessory5"];
             let target = slots.find(s => !gameData.equipped?.[s]);
-            if (!target) target = "accessory1";
+            if (!target) {
+                showToast("❌ 飾品欄位已滿（最多5個），請先卸下一個飾品");
+                return;
+            }
             item.type = target;
         }
 
@@ -2048,6 +2700,28 @@ function renderBattle() {
         if (battleInfo && area) {
             battleInfo.innerHTML = `<strong>${area.icon} ${area.name}</strong><br><em>${area.desc}</em>`;
         }
+
+        // 戰鬥詳細內容：不在 renderBattle 內清空，避免戰鬥結束瞬間被覆蓋
+        const detail = document.getElementById("battle-detail");
+        if (detail) {
+            if (battleUIState.field.lastDetailHtml) {
+                detail.innerHTML = battleUIState.field.lastDetailHtml;
+            } else {
+                detail.innerHTML = `<div style="opacity:0.85;">（尚無戰鬥詳細內容）</div>`;
+            }
+        }
+
+        // 戰鬥狀態：若尚未有戰鬥狀態，就先渲染玩家面板（敵方留空）
+        const status = document.getElementById("battle-status");
+        if (status) {
+            if (battleUIState.field.lastStatusHtml) {
+                status.innerHTML = battleUIState.field.lastStatusHtml;
+            } else {
+                const totalStats = calculateTotalStats();
+                renderBattleStatus({ mode: "field", char: gameData.character, total: totalStats, enemy: null });
+            }
+        }
+
         recordContainer.innerHTML = (gameData.battleRecord || []).slice(-10)
             .map(item => `<div>${item}</div>`)
             .join("");
@@ -2099,7 +2773,8 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
         const enemy = { ...monsterList[Math.floor(Math.random() * monsterList.length)] };
         const char = gameData.character;
         const totalStats = calculateTotalStats();
-        const battleInfo = document.getElementById("battle-info");
+        const battleDetail = document.getElementById("battle-detail");
+        const battleInfo = document.getElementById("battle-info"); // 保留給區域資訊使用
 
         // 飾品/套裝：戰鬥開始事件
         const logLines = [];
@@ -2109,8 +2784,12 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
 
         let log = `🎯 遭遇【${enemy.icon || ""} ${enemy.name}】！\n${enemy.desc || ""}`;
         if (logLines.length) log += `\n${logLines.join("\n")}`;
-        gameData.battleRecord.push(`[${new Date().toLocaleTimeString()}] ${log}`);
-        battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+
+        // 只把戰鬥的「詳細內容」放進 detail 區塊；battle-info 仍顯示區域資訊
+        const detailHtml = log.replace(/\n/g, "<br>");
+        battleUIState.field.lastDetailHtml = detailHtml;
+        if (battleDetail) battleDetail.innerHTML = detailHtml;
+        renderBattleStatus({ mode: "field", char, total: totalStats, enemy });
 
         while (char.hp > 0 && enemy.hp > 0) {
             await new Promise(resolve => setTimeout(resolve, 800));
@@ -2148,7 +2827,12 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
                 log += `\n${enemy.name}造成${enemyDmg}点伤害`;
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
-            battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+
+            // 更新狀態 + 詳細內容（不動 battle-info）
+            const stepHtml = log.replace(/\n/g, "<br>");
+            battleUIState.field.lastDetailHtml = stepHtml;
+            if (battleDetail) battleDetail.innerHTML = stepHtml;
+            renderBattleStatus({ mode: "field", char, total: totalStats, enemy });
         }
 
         if (char.hp <= 0) {
@@ -2175,8 +2859,13 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
             checkLevelUp();
             showToast("🎉 战斗胜利");
         }
+        // 戰鬥紀錄：只記最後一行結果（勝利/戰敗/最後事件）
         gameData.battleRecord.push(`[${new Date().toLocaleTimeString()}] ${log.split("\n").pop()}`);
-        battleInfo.innerHTML = log.replace(/\n/g, "<br>");
+
+        const finalHtml = log.replace(/\n/g, "<br>");
+        battleUIState.field.lastDetailHtml = finalHtml;
+        if (battleDetail) battleDetail.innerHTML = finalHtml;
+        renderBattleStatus({ mode: "field", char, total: totalStats, enemy });
         renderAll();
         saveGame();
     } catch (e) {
@@ -2344,10 +3033,21 @@ function renderForge() {
         const setTitle = setId ? getSetName(setId) : "無套裝";
         const setMeta = setId
             ? (() => {
+                // 既有：屬性加成敘述（SETS.bonuses）
                 const def = SETS?.[setId];
                 const two = def?.bonuses?.[2]?.desc;
                 const four = def?.bonuses?.[4]?.desc;
-                const parts = [two, four].filter(Boolean);
+
+                // 新增：特殊效果敘述（SET_EFFECTS）
+                const sp2 = getSetEffectDesc(setId, 2);
+                const sp4 = getSetEffectDesc(setId, 4);
+
+                const parts = [
+                    two ? `【2件】${two}` : "",
+                    sp2 ? `【2件特效】${sp2}` : "",
+                    four ? `【4件】${four}` : "",
+                    sp4 ? `【4件特效】${sp4}` : ""
+                ].filter(Boolean);
                 return parts.length ? `套裝效果：${parts.join(" / ")}` : "";
             })()
             : "";
