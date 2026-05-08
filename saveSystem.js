@@ -33,7 +33,7 @@ function getDefaultGameData() {
             equipments: [
                 { id:"wooden_sword", name:"木劍", type:"rightHand", str:2, def:1, level:1 }
             ],
-            foods: { apple:5, bread:3, meat:2 },
+            foods: { apple:5, bread:3, meat:2, stamina_jerky:1, antidote:1 },
             blueprints: ["wooden_sword","copper_armor","iron_sword"]
         },
         currentArea: "grassland",
@@ -44,6 +44,11 @@ function getDefaultGameData() {
             accessory1:null, accessory2:null, accessory3:null, accessory4:null, accessory5:null
         },
         battleRecord: [],
+        dungeon: {
+            floor: 1,
+            bestFloor: 1,
+            record: []
+        },
         log: []
     };
 }

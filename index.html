@@ -11,6 +11,7 @@
     <div class="tab-bar">
         <button class="tab-btn active" data-tab="role">角色狀態</button>
         <button class="tab-btn" data-tab="battle">戰鬥冒險</button>
+        <button class="tab-btn" data-tab="dungeon">地下城</button>
         <button class="tab-btn" data-tab="bag">背包裝備</button>
         <button class="tab-btn" data-tab="craft">道具製作</button>
         <button class="tab-btn" data-tab="forge">裝備鍛造</button>
@@ -64,7 +65,47 @@
             </div>
             <div class="bag-right">
                 <h2>🎒 背包物品</h2>
+                <div class="filter-bar" id="bag-equip-filter-bar" title="只影響背包中的裝備清單；食物/素材不會被篩選">
+                    <label>套裝
+                        <select id="bag-filter-set" title="依套裝篩選">
+                            <option value="all">全部</option>
+                            <option value="none">無套裝</option>
+                        </select>
+                    </label>
+                    <label>等級
+                        <select id="bag-filter-level" title="依裝備強化等級篩選">
+                            <option value="all">全部</option>
+                        </select>
+                    </label>
+                    <label>部位
+                        <select id="bag-filter-slot" title="依部位篩選">
+                            <option value="all">全部</option>
+                            <option value="rightHand">右手</option>
+                            <option value="leftHand">左手</option>
+                            <option value="hat">帽子</option>
+                            <option value="chest">衣服</option>
+                            <option value="pants">護腿</option>
+                            <option value="shoes">鞋子</option>
+                            <option value="accessory">飾品</option>
+                        </select>
+                    </label>
+                </div>
                 <div id="content-display"></div>
+            </div>
+        </div>
+
+        <!-- 地下城頁 -->
+        <div class="tab-page" id="dungeon">
+            <div class="battle-left">
+                <h2>🏰 地下城（無盡層）</h2>
+                <div id="dungeon-info" class="battle-log"></div>
+                <button id="dungeon-fight-btn" class="action-btn">挑戰下一層</button>
+                <button id="dungeon-reset-btn" class="action-btn">重置到第1層</button>
+                <p class="hint">提示：層數越高怪物越強、掉落品質越好（更高機率掉稀有材料、更多數量）。</p>
+            </div>
+            <div class="battle-right">
+                <h2>📜 地下城紀錄</h2>
+                <div id="dungeon-record" class="record-list"></div>
             </div>
         </div>
 
@@ -77,6 +118,35 @@
         <!-- 5. 裝備鍛造頁 -->
         <div class="tab-page beauty-page" id="forge">
             <h2>🔨 裝備鍛造</h2>
+            <div class="filter-bar" id="forge-filter-bar">
+                <label>套裝
+                    <select id="forge-filter-set" title="依套裝篩選">
+                        <option value="all">全部</option>
+                        <option value="none">無套裝</option>
+                    </select>
+                </label>
+                <label>等級
+                    <select id="forge-filter-level" title="依鍛造等級(配方等級)篩選">
+                        <option value="all">全部</option>
+                    </select>
+                </label>
+                <label>部位
+                    <select id="forge-filter-slot" title="依部位篩選">
+                        <option value="all">全部</option>
+                        <option value="rightHand">右手</option>
+                        <option value="leftHand">左手</option>
+                        <option value="hat">帽子</option>
+                        <option value="chest">衣服</option>
+                        <option value="pants">護腿</option>
+                        <option value="shoes">鞋子</option>
+                        <option value="accessory">飾品</option>
+                    </select>
+                </label>
+                <label class="filter-bar__check">
+                    <input type="checkbox" id="forge-filter-craftable" />
+                    只顯示可鍛造
+                </label>
+            </div>
             <div id="forge-content" class="beauty-grid"></div>
         </div>
 
@@ -94,4 +164,4 @@
     <script src="saveSystem.js"></script>
     <script src="game.js"></script>
 </body>
-</html>w
+</html>

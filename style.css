@@ -5,6 +5,13 @@
     font-family: "Microsoft JhengHei", sans-serif;
 }
 
+.hint {
+    margin-top: 10px;
+    opacity: 0.85;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
 body {
     background: #1a1a2e;
     color: #fff;
@@ -172,6 +179,93 @@ body {
 .beauty-card button:disabled {
     background: #666;
     cursor: not-allowed;
+}
+
+/* 篩選列（鍛造/背包裝備） */
+.filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+    padding: 10px 12px;
+    margin-top: 10px;
+    background: rgba(15, 52, 96, 0.55);
+    border: 1px solid rgba(233, 69, 96, 0.25);
+    border-radius: 10px;
+}
+
+.filter-bar label {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    font-size: 14px;
+    opacity: 0.95;
+}
+
+.filter-bar select {
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #0f3460;
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    outline: none;
+}
+
+.filter-bar__check {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+/* 鍛造：套裝分組顯示 */
+.set-group {
+    background: rgba(0, 0, 0, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 14px;
+}
+
+.set-group__title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: baseline;
+    margin-bottom: 10px;
+}
+
+.set-group__title h3 {
+    color: #e94560;
+    margin: 0;
+}
+
+.set-group__title .set-group__meta {
+    font-size: 12px;
+    opacity: 0.85;
+}
+
+/* 多行列網格（取代單行堆疊） */
+.beauty-grid.forge-grid {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+/* 讓鍛造卡片稍微更緊湊，避免資訊過長 */
+.beauty-card.compact {
+    padding: 14px;
+}
+
+.item-desc {
+    font-size: 13px;
+    color: #aaa;
+    font-style: italic;
+    margin: 5px 0;
+    line-height: 1.4;
+}
+
+/* 背包物品額外資訊（數值/效果/介紹） */
+.bag-meta {
+    color: #c9d1ff;
+    font-size: 12px;
+    margin-left: 6px;
+    opacity: 0.9;
 }
 
 /* 懸浮提示框 */
