@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RPG冒險物語</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 頂部標籤欄 -->
+    <div class="tab-bar">
+        <button class="tab-btn active" data-tab="role">角色狀態</button>
+        <button class="tab-btn" data-tab="battle">戰鬥冒險</button>
+        <button class="tab-btn" data-tab="bag">背包裝備</button>
+        <button class="tab-btn" data-tab="craft">道具製作</button>
+        <button class="tab-btn" data-tab="forge">裝備鍛造</button>
+        <button class="tab-btn" data-tab="enhance">裝備強化</button>
+    </div>
+
+    <!-- 頁面容器 -->
+    <div class="container">
+        <!-- 1. 角色狀態頁 -->
+        <div class="tab-page active" id="role">
+            <div class="role-panel">
+                <h2>📜 角色狀態</h2>
+                <div id="roleStats"></div>
+            </div>
+        </div>
+
+        <!-- 2. 戰鬥冒險頁 -->
+        <div class="tab-page" id="battle">
+            <div class="battle-left">
+                <h2>🗺️ 冒險區域</h2>
+                <select id="area-select" class="area-select" title="選擇冒險區域"></select>
+                <button id="gather-btn" class="action-btn">採集素材</button>
+                <button id="battle-btn" class="action-btn">開始戰鬥</button>
+                
+                <h2>⚔️ 戰鬥資訊</h2>
+                <div id="battle-info" class="battle-log"></div>
+            </div>
+            <div class="battle-right">
+                <h2>📜 戰鬥紀錄</h2>
+                <div id="battle-record" class="record-list"></div>
+            </div>
+        </div>
+
+        <!-- 3. 背包裝備頁 -->
+        <div class="tab-page" id="bag">
+            <div class="bag-left">
+                <h2>🎽 視覺化裝備欄</h2>
+                <div class="equip-grid">
+                    <div class="equip-slot" data-slot="hat">帽子<br><span id="hat"></span></div>
+                    <div class="equip-slot" data-slot="rightHand">右手<br><span id="rightHand"></span></div>
+                    <div class="equip-slot" data-slot="leftHand">左手<br><span id="leftHand"></span></div>
+                    <div class="equip-slot" data-slot="chest">衣服<br><span id="chest"></span></div>
+                    <div class="equip-slot" data-slot="pants">護腿<br><span id="pants"></span></div>
+                    <div class="equip-slot" data-slot="shoes">鞋子<br><span id="shoes"></span></div>
+                    <div class="equip-slot" data-slot="accessory1">飾品1<br><span id="accessory1"></span></div>
+                    <div class="equip-slot" data-slot="accessory2">飾品2<br><span id="accessory2"></span></div>
+                    <div class="equip-slot" data-slot="accessory3">飾品3<br><span id="accessory3"></span></div>
+                    <div class="equip-slot" data-slot="accessory4">飾品4<br><span id="accessory4"></span></div>
+                    <div class="equip-slot" data-slot="accessory5">飾品5<br><span id="accessory5"></span></div>
+                </div>
+            </div>
+            <div class="bag-right">
+                <h2>🎒 背包物品</h2>
+                <div id="content-display"></div>
+            </div>
+        </div>
+
+        <!-- 4. 道具製作頁 -->
+        <div class="tab-page beauty-page" id="craft">
+            <h2>📜 道具製作</h2>
+            <div id="craft-content" class="beauty-grid"></div>
+        </div>
+
+        <!-- 5. 裝備鍛造頁 -->
+        <div class="tab-page beauty-page" id="forge">
+            <h2>🔨 裝備鍛造</h2>
+            <div id="forge-content" class="beauty-grid"></div>
+        </div>
+
+        <!-- 6. 裝備強化頁 -->
+        <div class="tab-page beauty-page" id="enhance">
+            <h2>✨ 裝備強化</h2>
+            <div id="enhance-content" class="beauty-grid"></div>
+        </div>
+    </div>
+
+    <!-- 懸浮提示框 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 腳本 -->
+    <script src="saveSystem.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>w
