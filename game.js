@@ -49,6 +49,54 @@ function getEquippedAccessories() {
     return list;
 }
 
+// ========================== 飾品效果：等級縮放工具 ==========================
+// 目標：讓同一個 effectId 能隨飾品強化等級而提升「觸發率/數值」。
+// 注意：這裡的 lv 是「裝備實例等級」，最低 1。
+function getItemLevelSafe(item) {
+    const lv = Math.max(1, Number(item?.level) || 1);
+    return lv;
+}
+
+function scaleChance(base, lv, step = 0.02, max = 0.75) {
+    // base: 基礎機率 (0~1)
+    // step: 每級+機率
+    const p = Number(base) + (Math.max(1, Number(lv) || 1) - 1) * Number(step);
+    return clamp(p, 0, max);
+}
+
+function scaleValue(base, lv, step = 0.08) {
+    // base: 基礎數值
+    // step: 每級+百分比（0.08=每級+8%）
+    const x = Number(base) * (1 + (Math.max(1, Number(lv) || 1) - 1) * Number(step));
+    // 以整數顯示/計算較直覺
+    return Math.max(0, Math.floor(x));
+}
+
+function fmtPct(p) {
+    const n = Math.round(clamp(p, 0, 1) * 100);
+    return `${n}%`;
+}
+
+function getEffectDescForLevel(effectId, lv) {
+    const ef = ACCESSORY_EFFECTS?.[effectId];
+    if (!ef) return "";
+    try {
+        if (typeof ef.getDesc === "function") return String(ef.getDesc(lv));
+    } catch (e) {
+        console.warn("effect getDesc error", effectId, e);
+    }
+    return String(ef.desc || "");
+}
+
+function getItemSpecialEffectText(item) {
+    // 目前：飾品用 effectIds；未來可擴充到武器詞綴、套裝特效等。
+    const lv = getItemLevelSafe(item);
+    const ids = item?.effectIds || EQUIPMENTS?.[item?.id]?.effectIds;
+    if (!Array.isArray(ids) || ids.length === 0) return "";
+    const lines = ids.map(id => `- ${getEffectDescForLevel(id, lv)}`).filter(Boolean);
+    return lines.length ? `特殊效果：\n${lines.join("\n")}` : "";
+}
+
 function getAccessoryEffectIds() {
     // 以「實例」上的 effectIds 為主（便於未來做隨機詞綴）
     // 若舊存檔沒有 effectIds，則回退到 EQUIPMENTS 模板。
@@ -62,23 +110,307 @@ function getAccessoryEffectIds() {
 }
 
 function getAccessoryEffects() {
-    const ids = getAccessoryEffectIds();
-    return ids.map(id => ACCESSORY_EFFECTS[id]).filter(Boolean);
+    // 回傳「效果 + 裝備實例」配對，讓效果可以讀到等級。
+    const accs = getEquippedAccessories();
+    const out = [];
+    for (const it of accs) {
+        const ids = it.effectIds || EQUIPMENTS?.[it.id]?.effectIds;
+        if (!Array.isArray(ids)) continue;
+        for (const id of ids) {
+            const ef = ACCESSORY_EFFECTS[id];
+            if (ef) out.push({ ef, item: it });
+        }
+    }
+    return out;
 }
 
 function triggerAccessoryEvent(eventName, ctx) {
     // ctx 會被各效果讀寫；回傳 ctx 方便 caller 串接。
     const effects = getAccessoryEffects();
-    for (const ef of effects) {
+    for (const row of effects) {
         try {
+            const ef = row?.ef;
+            const item = row?.item;
             const fn = ef?.[eventName];
-            if (typeof fn === "function") fn(ctx);
+            if (typeof fn === "function") {
+                // 附加常用欄位（不影響舊效果：多的參數 JS 會忽略）
+                fn(ctx, {
+                    item,
+                    lv: getItemLevelSafe(item)
+                });
+            }
         } catch (e) {
-            console.warn("Accessory effect error", ef?.id, eventName, e);
+            console.warn("Accessory effect error", row?.ef?.id, eventName, e);
         }
     }
     return ctx;
 }
+
+// ========================== 套裝特殊效果（事件鉤子系統） ==========================
+// 需求：讓套裝效果不再只有屬性提升，也能像飾品一樣提供特殊效果。
+// 做法：
+// - SETS 仍保留 bonuses（屬性加成）
+// - 另以 SET_EFFECTS 定義各套裝的特殊效果（事件：battleStart/beforePlayerAttack/.../gather/victory）
+
+function getEquippedSetCounts() {
+    const equip = gameData?.equipped || {};
+    const counts = {};
+    for (const slot in equip) {
+        const it = equip[slot];
+        const setId = it?.setId;
+        if (!setId) continue;
+        counts[setId] = (counts[setId] || 0) + 1;
+    }
+    return counts;
+}
+
+function getActiveSetEffects() {
+    // 回傳：[{ setId, tier, ef }]
+    const counts = getEquippedSetCounts();
+    const out = [];
+    for (const setId in counts) {
+        const pieces = counts[setId];
+        const def = SET_EFFECTS?.[setId];
+        if (!def) continue;
+        const tiers = Object.keys(def.tiers || {})
+            .map(n => Number(n))
+            .filter(n => !Number.isNaN(n))
+            .sort((a, b) => a - b);
+        for (const t of tiers) {
+            if (pieces >= t) {
+                const ef = def.tiers[t];
+                if (ef) out.push({ setId, tier: t, ef });
+            }
+        }
+    }
+    return out;
+}
+
+function triggerSetEvent(eventName, ctx) {
+    const effects = getActiveSetEffects();
+    for (const row of effects) {
+        try {
+            const fn = row?.ef?.[eventName];
+            if (typeof fn === "function") fn(ctx, { setId: row.setId, tier: row.tier });
+        } catch (e) {
+            console.warn("Set effect error", row?.setId, row?.tier, eventName, e);
+        }
+    }
+    return ctx;
+}
+
+function getSetEffectDesc(setId, tier) {
+    const def = SET_EFFECTS?.[setId];
+    const ef = def?.tiers?.[tier];
+    if (!ef) return "";
+    if (typeof ef.getDesc === "function") {
+        try { return String(ef.getDesc()); } catch { /* ignore */ }
+    }
+    return String(ef.desc || "");
+}
+
+// 套裝特殊效果定義：每套至少 2 件 / 4 件各一個效果
+const SET_EFFECTS = {
+    traveler: {
+        name: "旅人套裝",
+        tiers: {
+            2: {
+                desc: "戰鬥開始獲得護盾（吸收 10 點傷害）。",
+                getDesc() { return "戰鬥開始獲得護盾（吸收 10 點傷害）。"; },
+                battleStart(ctx) {
+                    const c = ctx.char;
+                    c.__shield = (c.__shield || 0) + 10;
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：旅人(2) 開戰護盾 +10"));
+                }
+            },
+            4: {
+                desc: "採集時 20% 額外獲得 +1 份素材。",
+                getDesc() { return "採集時 20% 額外獲得 +1 份素材。"; },
+                gather(ctx) {
+                    if (!chance(0.20)) return;
+                    ctx.count += 1;
+                    ctx.toastSuffix = (ctx.toastSuffix || "") + "（旅人套裝+1）";
+                }
+            }
+        }
+    },
+    guard: {
+        name: "守卫套装",
+        tiers: {
+            2: {
+                desc: "受到攻擊前 12% 使本次受到的傷害 -40%。",
+                getDesc() { return "受到攻擊前 12% 使本次受到的傷害 -40%。"; },
+                beforeEnemyAttack(ctx) {
+                    if (!chance(0.12)) return;
+                    ctx.damage = Math.max(0, Math.floor((ctx.damage || 0) * 0.60));
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：守卫(2) 格擋成功（受傷-40%）"));
+                }
+            },
+            4: {
+                desc: "當你仍有護盾時，你的攻擊傷害 +15%。",
+                getDesc() { return "當你仍有護盾時，你的攻擊傷害 +15%。"; },
+                beforePlayerAttack(ctx) {
+                    if ((ctx.char.__shield || 0) <= 0) return;
+                    ctx.damage = Math.floor((ctx.damage || 0) * 1.15);
+                }
+            }
+        }
+    },
+    ranger: {
+        name: "游侠套装",
+        tiers: {
+            2: {
+                desc: "攻擊後 12% 追加一次 40% 傷害的追擊。",
+                getDesc() { return "攻擊後 12% 追加一次 40% 傷害的追擊。"; },
+                afterPlayerAttack(ctx) {
+                    if (!chance(0.12)) return;
+                    const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * 0.40));
+                    ctx.enemy.hp -= dmg;
+                    ctx.logLines?.push(addBattleLogLine(`🧩 套裝：游侠(2) 追擊造成 ${dmg} 傷害`));
+                }
+            },
+            4: {
+                desc: "勝利後 20% 額外獲得 魔法水晶 x1。",
+                getDesc() { return "勝利後 20% 額外獲得 魔法水晶 x1。"; },
+                victory(ctx) {
+                    if (!chance(0.20)) return;
+                    ctx.drops.crystal = (ctx.drops.crystal || 0) + 1;
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：游侠(4) 額外掉落 水晶x1"));
+                }
+            }
+        }
+    },
+    mage: {
+        name: "法师套装",
+        tiers: {
+            2: {
+                desc: "戰鬥開始回復 8 MP。",
+                getDesc() { return "戰鬥開始回復 8 MP。"; },
+                battleStart(ctx) {
+                    const c = ctx.char;
+                    c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + 8);
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：法师(2) 開戰回魔 +8"));
+                }
+            },
+            4: {
+                desc: "攻擊時 18% 追加相當於敵人防禦 35% 的傷害（穿甲）。",
+                getDesc() { return "攻擊時 18% 追加相當於敵人防禦 35% 的傷害（穿甲）。"; },
+                beforePlayerAttack(ctx) {
+                    if (!chance(0.18)) return;
+                    const extra = Math.max(1, Math.floor((ctx.enemy?.def || 0) * 0.35));
+                    ctx.damage = (ctx.damage || 0) + extra;
+                    ctx.logLines?.push(addBattleLogLine(`🧩 套裝：法师(4) 穿甲追加 +${extra}`));
+                }
+            }
+        }
+    },
+    shadow: {
+        name: "暗影套装",
+        tiers: {
+            2: {
+                desc: "地下城戰鬥開始時 20% 先手造成 10 點傷害。",
+                getDesc() { return "地下城戰鬥開始時 20% 先手造成 10 點傷害。"; },
+                battleStart(ctx) {
+                    if (ctx.mode !== "dungeon") return;
+                    if (!chance(0.20)) return;
+                    ctx.enemy.hp -= 10;
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：暗影(2) 先手突襲 -10"));
+                }
+            },
+            4: {
+                desc: "攻擊後 10% 吸血：回復本次造成傷害的 15%（上限 18）。",
+                getDesc() { return "攻擊後 10% 吸血：回復本次造成傷害的 15%（上限 18）。"; },
+                afterPlayerAttack(ctx) {
+                    if (!chance(0.10)) return;
+                    const heal = clamp(Math.floor((ctx.damageDealt || 0) * 0.15), 0, 18);
+                    if (heal <= 0) return;
+                    ctx.char.hp = Math.min(ctx.total.hpMax, (ctx.char.hp || 0) + heal);
+                    ctx.logLines?.push(addBattleLogLine(`🧩 套裝：暗影(4) 吸血回復 ${heal} HP`));
+                }
+            }
+        }
+    },
+    volcanic: {
+        name: "火山套装",
+        tiers: {
+            2: {
+                desc: "攻擊時 10% 造成額外 8 點灼熱傷害。",
+                getDesc() { return "攻擊時 10% 造成額外 8 點灼熱傷害。"; },
+                afterPlayerAttack(ctx) {
+                    if (!chance(0.10)) return;
+                    const dmg = 8;
+                    ctx.enemy.hp -= dmg;
+                    ctx.logLines?.push(addBattleLogLine(`🧩 套裝：火山(2) 灼熱追加 ${dmg} 傷害`));
+                }
+            },
+            4: {
+                desc: "戰鬥開始獲得護盾（吸收 20 點傷害）。",
+                getDesc() { return "戰鬥開始獲得護盾（吸收 20 點傷害）。"; },
+                battleStart(ctx) {
+                    const c = ctx.char;
+                    c.__shield = (c.__shield || 0) + 20;
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：火山(4) 開戰護盾 +20"));
+                }
+            }
+        }
+    },
+    holy: {
+        name: "圣光套装",
+        tiers: {
+            2: {
+                desc: "勝利後回復 10 HP 與 6 MP。",
+                getDesc() { return "勝利後回復 10 HP 與 6 MP。"; },
+                victory(ctx) {
+                    const c = ctx.char;
+                    c.hp = Math.min(ctx.total.hpMax, (c.hp || 0) + 10);
+                    c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + 6);
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：圣光(2) 勝利回復 HP+10 MP+6"));
+                }
+            },
+            4: {
+                desc: "每場戰鬥 1 次：受到致命傷害時保留 1 HP。",
+                getDesc() { return "每場戰鬥 1 次：受到致命傷害時保留 1 HP。"; },
+                battleStart(ctx) {
+                    ctx.char.__holyCheatUsed = false;
+                },
+                beforeEnemyAttack(ctx) {
+                    const c = ctx.char;
+                    if (c.__holyCheatUsed) return;
+                    const incoming = ctx.damage || 0;
+                    if ((c.hp || 0) - incoming <= 0) {
+                        ctx.damage = Math.max(0, (c.hp || 0) - 1);
+                        c.__holyCheatUsed = true;
+                        ctx.logLines?.push(addBattleLogLine("🧩 套裝：圣光(4) 神佑（保留 1HP）"));
+                    }
+                }
+            }
+        }
+    },
+    abyss: {
+        name: "深渊套装",
+        tiers: {
+            2: {
+                desc: "敵人攻擊前 15% 使其本次傷害 -35%。",
+                getDesc() { return "敵人攻擊前 15% 使其本次傷害 -35%。"; },
+                beforeEnemyAttack(ctx) {
+                    if (!chance(0.15)) return;
+                    ctx.damage = Math.max(0, Math.floor((ctx.damage || 0) * 0.65));
+                    ctx.logLines?.push(addBattleLogLine("🧩 套裝：深渊(2) 低語壓制（敵傷害-35%）"));
+                }
+            },
+            4: {
+                desc: "攻擊時 12% 造成二連擊（第二擊 50% 傷害）。",
+                getDesc() { return "攻擊時 12% 造成二連擊（第二擊 50% 傷害）。"; },
+                afterPlayerAttack(ctx) {
+                    if (!chance(0.12)) return;
+                    const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * 0.50));
+                    ctx.enemy.hp -= dmg;
+                    ctx.logLines?.push(addBattleLogLine(`🧩 套裝：深渊(4) 二連擊追加 ${dmg} 傷害`));
+                }
+            }
+        }
+    }
+};
 
 function clamp(n, min, max) {
     const x = Number(n);
@@ -104,10 +436,16 @@ const ACCESSORY_EFFECTS = {
         id: "ward_start_shield",
         name: "開戰護盾",
         desc: "戰鬥開始獲得護盾（吸收 15 點傷害），直到被打破。",
-        battleStart(ctx) {
+        getDesc(lv) {
+            const shield = scaleValue(15, lv, 0.10);
+            return `戰鬥開始獲得護盾（吸收 ${shield} 點傷害），直到被打破。`;
+        },
+        battleStart(ctx, meta) {
+            const lv = meta?.lv || 1;
             const c = ctx.char;
-            c.__shield = (c.__shield || 0) + 15;
-            ctx.logLines?.push(addBattleLogLine("🛡️ 飾品：開戰護盾啟動（護盾+15）"));
+            const shield = scaleValue(15, lv, 0.10);
+            c.__shield = (c.__shield || 0) + shield;
+            ctx.logLines?.push(addBattleLogLine(`🛡️ 飾品：開戰護盾啟動（護盾+${shield}）`));
         }
     },
     // 2) 反擊：受到攻擊後 20% 追加反擊 35% 傷害
@@ -115,9 +453,17 @@ const ACCESSORY_EFFECTS = {
         id: "thorn_counter",
         name: "荊棘反擊",
         desc: "受到攻擊後 20% 反擊（造成 35% 你本次受到的傷害）。",
-        afterEnemyAttack(ctx) {
-            if (!chance(0.20)) return;
-            const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * 0.35));
+        getDesc(lv) {
+            const p = scaleChance(0.20, lv, 0.02, 0.55);
+            const ratio = clamp(0.35 + (lv - 1) * 0.02, 0.35, 0.75);
+            return `受到攻擊後 ${fmtPct(p)} 反擊（造成 ${Math.round(ratio * 100)}% 你本次受到的傷害）。`;
+        },
+        afterEnemyAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.20, lv, 0.02, 0.55);
+            if (!chance(p)) return;
+            const ratio = clamp(0.35 + (lv - 1) * 0.02, 0.35, 0.75);
+            const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * ratio));
             ctx.enemy.hp -= dmg;
             ctx.logLines?.push(addBattleLogLine(`🌵 飾品反擊造成 ${dmg} 傷害`));
         }
@@ -127,11 +473,19 @@ const ACCESSORY_EFFECTS = {
         id: "execute_lowhp",
         name: "處決者",
         desc: "敵人生命低於 12% 時，你的攻擊傷害 +50%。",
-        beforePlayerAttack(ctx) {
+        getDesc(lv) {
+            const threshold = clamp(0.12 + (lv - 1) * 0.01, 0.12, 0.25);
+            const mult = clamp(1.5 + (lv - 1) * 0.05, 1.5, 2.2);
+            return `敵人生命低於 ${Math.round(threshold * 100)}% 時，你的攻擊傷害 +${Math.round((mult - 1) * 100)}%。`;
+        },
+        beforePlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
             const e = ctx.enemy;
             if (!e?.hpMax) return;
-            if ((e.hp / e.hpMax) <= 0.12) {
-                ctx.damage = Math.floor((ctx.damage || 0) * 1.5);
+            const threshold = clamp(0.12 + (lv - 1) * 0.01, 0.12, 0.25);
+            const mult = clamp(1.5 + (lv - 1) * 0.05, 1.5, 2.2);
+            if ((e.hp / e.hpMax) <= threshold) {
+                ctx.damage = Math.floor((ctx.damage || 0) * mult);
                 ctx.logLines?.push(addBattleLogLine("⚔️ 飾品：處決者發動（傷害+50%）"));
             }
         }
@@ -141,9 +495,17 @@ const ACCESSORY_EFFECTS = {
         id: "pierce_armor",
         name: "穿甲刻印",
         desc: "攻擊時 25% 機率穿甲：額外造成相當於敵人防禦 50% 的傷害。",
-        beforePlayerAttack(ctx) {
-            if (!chance(0.25)) return;
-            const extra = Math.max(1, Math.floor((ctx.enemy?.def || 0) * 0.5));
+        getDesc(lv) {
+            const p = scaleChance(0.25, lv, 0.02, 0.60);
+            const ratio = clamp(0.50 + (lv - 1) * 0.03, 0.50, 1.10);
+            return `攻擊時 ${fmtPct(p)} 機率穿甲：額外造成相當於敵人防禦 ${Math.round(ratio * 100)}% 的傷害。`;
+        },
+        beforePlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.25, lv, 0.02, 0.60);
+            if (!chance(p)) return;
+            const ratio = clamp(0.50 + (lv - 1) * 0.03, 0.50, 1.10);
+            const extra = Math.max(1, Math.floor((ctx.enemy?.def || 0) * ratio));
             ctx.damage = (ctx.damage || 0) + extra;
             ctx.logLines?.push(addBattleLogLine(`🪓 飾品：穿甲追加 +${extra}`));
         }
@@ -153,8 +515,16 @@ const ACCESSORY_EFFECTS = {
         id: "vampiric",
         name: "嗜血",
         desc: "你造成傷害的 15% 轉為治療（每次最多 12）。",
-        afterPlayerAttack(ctx) {
-            const heal = clamp(Math.floor((ctx.damageDealt || 0) * 0.15), 0, 12);
+        getDesc(lv) {
+            const ratio = clamp(0.15 + (lv - 1) * 0.01, 0.15, 0.28);
+            const cap = scaleValue(12, lv, 0.12);
+            return `你造成傷害的 ${Math.round(ratio * 100)}% 轉為治療（每次最多 ${cap}）。`;
+        },
+        afterPlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const ratio = clamp(0.15 + (lv - 1) * 0.01, 0.15, 0.28);
+            const cap = scaleValue(12, lv, 0.12);
+            const heal = clamp(Math.floor((ctx.damageDealt || 0) * ratio), 0, cap);
             if (heal <= 0) return;
             ctx.char.hp = Math.min(ctx.total.hpMax, (ctx.char.hp || 0) + heal);
             ctx.logLines?.push(addBattleLogLine(`🩸 飾品：嗜血回復 ${heal} HP`));
@@ -165,9 +535,17 @@ const ACCESSORY_EFFECTS = {
         id: "double_strike",
         name: "連擊",
         desc: "攻擊後 10% 追加一次 50% 傷害的追擊。",
-        afterPlayerAttack(ctx) {
-            if (!chance(0.10)) return;
-            const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * 0.5));
+        getDesc(lv) {
+            const p = scaleChance(0.10, lv, 0.015, 0.40);
+            const ratio = clamp(0.50 + (lv - 1) * 0.03, 0.50, 1.00);
+            return `攻擊後 ${fmtPct(p)} 追加一次 ${Math.round(ratio * 100)}% 傷害的追擊。`;
+        },
+        afterPlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.10, lv, 0.015, 0.40);
+            if (!chance(p)) return;
+            const ratio = clamp(0.50 + (lv - 1) * 0.03, 0.50, 1.00);
+            const dmg = Math.max(1, Math.floor((ctx.damageDealt || 0) * ratio));
             ctx.enemy.hp -= dmg;
             ctx.logLines?.push(addBattleLogLine(`⚡ 飾品：追擊造成 ${dmg} 傷害`));
         }
@@ -177,9 +555,17 @@ const ACCESSORY_EFFECTS = {
         id: "blessing_extra_drop",
         name: "祝福贈禮",
         desc: "勝利後 25% 額外獲得 1 個魔法水晶。",
-        victory(ctx) {
-            if (!chance(0.25)) return;
-            ctx.drops.crystal = (ctx.drops.crystal || 0) + 1;
+        getDesc(lv) {
+            const p = scaleChance(0.25, lv, 0.02, 0.65);
+            const extra = Math.max(1, 1 + Math.floor((lv - 1) / 4));
+            return `勝利後 ${fmtPct(p)} 額外獲得 魔法水晶 x${extra}。`;
+        },
+        victory(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.25, lv, 0.02, 0.65);
+            if (!chance(p)) return;
+            const extra = Math.max(1, 1 + Math.floor((lv - 1) / 4));
+            ctx.drops.crystal = (ctx.drops.crystal || 0) + extra;
             ctx.logLines?.push(addBattleLogLine("✨ 飾品：祝福贈禮（額外掉落 水晶x1）"));
         }
     },
@@ -188,9 +574,17 @@ const ACCESSORY_EFFECTS = {
         id: "gather_lucky",
         name: "採集幸運",
         desc: "採集時 30% 額外獲得 +1 份素材。",
-        gather(ctx) {
-            if (!chance(0.30)) return;
-            ctx.count += 1;
+        getDesc(lv) {
+            const p = scaleChance(0.30, lv, 0.02, 0.70);
+            const extra = Math.max(1, 1 + Math.floor((lv - 1) / 3));
+            return `採集時 ${fmtPct(p)} 額外獲得 +${extra} 份素材。`;
+        },
+        gather(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.30, lv, 0.02, 0.70);
+            if (!chance(p)) return;
+            const extra = Math.max(1, 1 + Math.floor((lv - 1) / 3));
+            ctx.count += extra;
             ctx.toastSuffix = (ctx.toastSuffix || "") + "（幸運+1）";
         }
     },
@@ -199,9 +593,15 @@ const ACCESSORY_EFFECTS = {
         id: "gather_refine_herb",
         name: "草藥提純",
         desc: "採到藥草時 20% 轉化為紅藥草。",
-        gather(ctx) {
+        getDesc(lv) {
+            const p = scaleChance(0.20, lv, 0.02, 0.65);
+            return `採到藥草時 ${fmtPct(p)} 轉化為紅藥草。`;
+        },
+        gather(ctx, meta) {
+            const lv = meta?.lv || 1;
             if (ctx.mat !== "herb") return;
-            if (!chance(0.20)) return;
+            const p = scaleChance(0.20, lv, 0.02, 0.65);
+            if (!chance(p)) return;
             ctx.mat = "red_herb";
             ctx.toastSuffix = (ctx.toastSuffix || "") + "（提純）";
         }
@@ -211,11 +611,19 @@ const ACCESSORY_EFFECTS = {
         id: "dungeon_first_blood",
         name: "先手猛攻",
         desc: "地下城戰鬥開始時 20% 先手造成 10 點傷害。",
-        battleStart(ctx) {
+        getDesc(lv) {
+            const p = scaleChance(0.20, lv, 0.02, 0.60);
+            const dmg = scaleValue(10, lv, 0.12);
+            return `地下城戰鬥開始時 ${fmtPct(p)} 先手造成 ${dmg} 點傷害。`;
+        },
+        battleStart(ctx, meta) {
+            const lv = meta?.lv || 1;
             if (ctx.mode !== "dungeon") return;
-            if (!chance(0.20)) return;
-            ctx.enemy.hp -= 10;
-            ctx.logLines?.push(addBattleLogLine("💥 飾品：先手猛攻（-10）"));
+            const p = scaleChance(0.20, lv, 0.02, 0.60);
+            if (!chance(p)) return;
+            const dmg = scaleValue(10, lv, 0.12);
+            ctx.enemy.hp -= dmg;
+            ctx.logLines?.push(addBattleLogLine(`💥 飾品：先手猛攻（-${dmg}）`));
         }
     },
     // 11) 防爆：受到致命一擊時（HP 將降到 0 以下）改為保留 1 HP（每場 1 次）
@@ -223,7 +631,7 @@ const ACCESSORY_EFFECTS = {
         id: "cheat_death_once",
         name: "不屈護符",
         desc: "每場戰鬥 1 次：受到致命傷害時保留 1 HP。",
-        beforeEnemyAttack(ctx) {
+        beforeEnemyAttack(ctx, meta) {
             const c = ctx.char;
             if (c.__cheatDeathUsed) return;
             // 用「即將受到的傷害」判定
@@ -244,13 +652,21 @@ const ACCESSORY_EFFECTS = {
         id: "storm_charge",
         name: "風暴蓄能",
         desc: "每 3 次攻擊後，下一擊追加 8 點傷害。",
-        beforePlayerAttack(ctx) {
+        getDesc(lv) {
+            const need = Math.max(1, 3 - Math.floor((lv - 1) / 4));
+            const extra = scaleValue(8, lv, 0.12);
+            return `每 ${need} 次攻擊後，下一擊追加 ${extra} 點傷害。`;
+        },
+        beforePlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const need = Math.max(1, 3 - Math.floor((lv - 1) / 4));
+            const extra = scaleValue(8, lv, 0.12);
             const c = ctx.char;
             c.__stormCount = c.__stormCount || 0;
-            if (c.__stormCount >= 3) {
-                ctx.damage += 8;
+            if (c.__stormCount >= need) {
+                ctx.damage += extra;
                 c.__stormCount = 0;
-                ctx.logLines?.push(addBattleLogLine("🌩️ 飾品：風暴蓄能釋放（+8）"));
+                ctx.logLines?.push(addBattleLogLine(`🌩️ 飾品：風暴蓄能釋放（+${extra}）`));
             }
         },
         afterPlayerAttack(ctx) {
@@ -263,10 +679,18 @@ const ACCESSORY_EFFECTS = {
         id: "weaken_enemy",
         name: "遲滯凝視",
         desc: "敵人攻擊前 12% 機率使其傷害降低 40%。",
-        beforeEnemyAttack(ctx) {
-            if (!chance(0.12)) return;
-            ctx.damage = Math.max(0, Math.floor((ctx.damage || 0) * 0.6));
-            ctx.logLines?.push(addBattleLogLine("👁️ 飾品：遲滯凝視（敵傷害-40%）"));
+        getDesc(lv) {
+            const p = scaleChance(0.12, lv, 0.015, 0.45);
+            const ratio = clamp(0.60 - (lv - 1) * 0.015, 0.35, 0.60); // 越高越痛：剩餘比例越低
+            return `敵人攻擊前 ${fmtPct(p)} 機率使其傷害降低 ${Math.round((1 - ratio) * 100)}%。`;
+        },
+        beforeEnemyAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.12, lv, 0.015, 0.45);
+            if (!chance(p)) return;
+            const ratio = clamp(0.60 - (lv - 1) * 0.015, 0.35, 0.60);
+            ctx.damage = Math.max(0, Math.floor((ctx.damage || 0) * ratio));
+            ctx.logLines?.push(addBattleLogLine(`👁️ 飾品：遲滯凝視（敵傷害-${Math.round((1 - ratio) * 100)}%）`));
         }
     },
     // 14) 祝福回魔：每次勝利回復 6 MP
@@ -274,10 +698,16 @@ const ACCESSORY_EFFECTS = {
         id: "victory_mana",
         name: "勝利回魔",
         desc: "勝利後回復 6 MP。",
-        victory(ctx) {
+        getDesc(lv) {
+            const mp = scaleValue(6, lv, 0.15);
+            return `勝利後回復 ${mp} MP。`;
+        },
+        victory(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const mp = scaleValue(6, lv, 0.15);
             const c = ctx.char;
-            c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + 6);
-            ctx.logLines?.push(addBattleLogLine("💙 飾品：勝利回魔 +6"));
+            c.mp = Math.min(ctx.total.mpMax, (c.mp || 0) + mp);
+            ctx.logLines?.push(addBattleLogLine(`💙 飾品：勝利回魔 +${mp}`));
         }
     },
     // 15) 破盾增傷：若自身有護盾，本次攻擊傷害 +20%
@@ -285,9 +715,15 @@ const ACCESSORY_EFFECTS = {
         id: "shield_fury",
         name: "護盾之怒",
         desc: "當你仍有護盾時，你的攻擊傷害 +20%。",
-        beforePlayerAttack(ctx) {
+        getDesc(lv) {
+            const mult = clamp(1.20 + (lv - 1) * 0.03, 1.20, 1.65);
+            return `當你仍有護盾時，你的攻擊傷害 +${Math.round((mult - 1) * 100)}%。`;
+        },
+        beforePlayerAttack(ctx, meta) {
+            const lv = meta?.lv || 1;
             if ((ctx.char.__shield || 0) <= 0) return;
-            ctx.damage = Math.floor((ctx.damage || 0) * 1.2);
+            const mult = clamp(1.20 + (lv - 1) * 0.03, 1.20, 1.65);
+            ctx.damage = Math.floor((ctx.damage || 0) * mult);
         }
     },
     // 16) 保底：採集時若抽到較低階素材，有 10% 直接改為該區域列表最後一個（通常較稀有）
@@ -295,8 +731,14 @@ const ACCESSORY_EFFECTS = {
         id: "gather_upgrade",
         name: "祕密羅盤",
         desc: "採集時 10% 直接取得該區域採集列表的『最稀有項』。",
-        gather(ctx) {
-            if (!chance(0.10)) return;
+        getDesc(lv) {
+            const p = scaleChance(0.10, lv, 0.015, 0.45);
+            return `採集時 ${fmtPct(p)} 直接取得該區域採集列表的『最稀有項』。`;
+        },
+        gather(ctx, meta) {
+            const lv = meta?.lv || 1;
+            const p = scaleChance(0.10, lv, 0.015, 0.45);
+            if (!chance(p)) return;
             const list = AREAS?.[ctx.area]?.gather || [];
             if (list.length === 0) return;
             ctx.mat = list[list.length - 1];
@@ -1106,9 +1548,11 @@ async function dungeonFight() {
         const totalStats = calculateTotalStats();
         const battleInfo = document.getElementById("dungeon-info");
 
-        // 飾品：地下城戰鬥開始事件
+        // 飾品/套裝：地下城戰鬥開始事件
         const logLines = [];
-        triggerAccessoryEvent("battleStart", { mode: "dungeon", char, total: totalStats, enemy, logLines });
+        const startCtx = { mode: "dungeon", char, total: totalStats, enemy, logLines };
+        triggerAccessoryEvent("battleStart", startCtx);
+        triggerSetEvent("battleStart", startCtx);
 
         let log = `🏰 第${floor}层遭遇【${enemy.icon || ""} ${enemy.name}】！\n${enemy.desc || ""}`;
         if (logLines.length) log += `\n${logLines.join("\n")}`;
@@ -1118,12 +1562,15 @@ async function dungeonFight() {
         while (char.hp > 0 && enemy.hp > 0) {
             await new Promise(resolve => setTimeout(resolve, 650));
 
-            // 玩家出手：可被飾品改寫 damage
+            // 玩家出手：可被飾品/套裝改寫 damage
             const playerCtx = { mode: "dungeon", char, total: totalStats, enemy, damage: Math.max(1, totalStats.str - enemy.def), logLines: [] };
             triggerAccessoryEvent("beforePlayerAttack", playerCtx);
+            triggerSetEvent("beforePlayerAttack", playerCtx);
             const playerDmg = Math.max(1, Math.floor(playerCtx.damage || 1));
             enemy.hp -= playerDmg;
-            triggerAccessoryEvent("afterPlayerAttack", { mode: "dungeon", char, total: totalStats, enemy, damageDealt: playerDmg, logLines: playerCtx.logLines });
+            const afterPlayerCtx = { mode: "dungeon", char, total: totalStats, enemy, damageDealt: playerDmg, logLines: playerCtx.logLines };
+            triggerAccessoryEvent("afterPlayerAttack", afterPlayerCtx);
+            triggerSetEvent("afterPlayerAttack", afterPlayerCtx);
             log += `\n你造成${playerDmg}点伤害（怪物HP:${Math.max(0, enemy.hp)}/${enemy.hpMax}）`;
             if (playerCtx.logLines.length) log += `\n${playerCtx.logLines.join("\n")}`;
             if (enemy.hp > 0) {
@@ -1132,6 +1579,7 @@ async function dungeonFight() {
                 const baseEnemyDmg = Math.max(1, enemy.str - totalStats.def);
                 const enemyCtx = { mode: "dungeon", char, total: totalStats, enemy, damage: baseEnemyDmg, logLines: [] };
                 triggerAccessoryEvent("beforeEnemyAttack", enemyCtx);
+                triggerSetEvent("beforeEnemyAttack", enemyCtx);
                 let enemyDmg = Math.max(0, Math.floor(enemyCtx.damage || 0));
 
                 // 護盾吸收
@@ -1142,7 +1590,9 @@ async function dungeonFight() {
                     enemyCtx.logLines.push(addBattleLogLine(`🛡️ 護盾吸收 ${absorb} 伤害（剩余护盾 ${char.__shield}）`));
                 }
                 char.hp -= enemyDmg;
-                triggerAccessoryEvent("afterEnemyAttack", { mode: "dungeon", char, total: totalStats, enemy, damageDealt: enemyDmg, logLines: enemyCtx.logLines });
+                const afterEnemyCtx = { mode: "dungeon", char, total: totalStats, enemy, damageDealt: enemyDmg, logLines: enemyCtx.logLines };
+                triggerAccessoryEvent("afterEnemyAttack", afterEnemyCtx);
+                triggerSetEvent("afterEnemyAttack", afterEnemyCtx);
                 log += `\n${enemy.name}造成${enemyDmg}点伤害（你的HP:${Math.max(0, char.hp)}/${totalStats.hpMax}）`;
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
@@ -1158,7 +1608,9 @@ async function dungeonFight() {
             // 勝利事件：允許飾品追加掉落/回復等
             const drops = { ...(enemy.drop || {}) };
             const victoryLines = [];
-            triggerAccessoryEvent("victory", { mode: "dungeon", char, total: totalStats, enemy, drops, logLines: victoryLines });
+            const victoryCtx = { mode: "dungeon", char, total: totalStats, enemy, drops, logLines: victoryLines };
+            triggerAccessoryEvent("victory", victoryCtx);
+            triggerSetEvent("victory", victoryCtx);
 
             log += `\n🎉 通关第${floor}层！获得${enemy.exp}经验`;
             char.exp += enemy.exp;
@@ -1272,8 +1724,30 @@ function renderRole() {
     const container = document.getElementById("roleStats");
     if (!container) return;
     const setBonus = calculateSetBonuses();
-    const setText = (setBonus.active.length > 0)
-        ? `<div style="margin-top:10px;"><strong>🧩 套裝效果</strong><br>${setBonus.active.map(s => `- ${s}`).join("<br>")}</div>`
+    // 額外：套裝「特殊效果」敘述（2/4件）
+    const setCounts = getEquippedSetCounts();
+    const specialLines = [];
+    for (const setId in setCounts) {
+        const pieces = setCounts[setId];
+        const setName = getSetName(setId);
+        // 依目前有達成的 tier 顯示
+        const tiers = Object.keys(SET_EFFECTS?.[setId]?.tiers || {})
+            .map(n => Number(n))
+            .filter(n => !Number.isNaN(n))
+            .sort((a, b) => a - b);
+        for (const t of tiers) {
+            if (pieces < t) continue;
+            const desc = getSetEffectDesc(setId, t);
+            if (desc) specialLines.push(`${setName} (${t}) ${desc}`);
+        }
+    }
+
+    const setText = (setBonus.active.length > 0 || specialLines.length > 0)
+        ? `<div style="margin-top:10px;"><strong>🧩 套裝效果</strong><br>${[
+            ...setBonus.active.map(s => `- ${s}`),
+            ...(specialLines.length ? ["<span style=\"opacity:0.9;\">特殊效果：</span>"] : []),
+            ...specialLines.map(s => `- ${s}`)
+        ].join("<br>")}</div>`
         : `<div style="margin-top:10px; opacity:0.85;"><strong>🧩 套裝效果</strong><br>（尚未啟用）</div>`;
     container.innerHTML = `
         <div>等级：Lv.${char.level || 1}</div>
@@ -1351,20 +1825,39 @@ function renderBag() {
             bagLvSelect.value = prev;
         }
 
-        // 食物
-        html += `📌 食物：<br>`;
+        // 食物（卡片化）
+        html += `<div class="bag-section">`;
+        html += `<div class="bag-section__title">📌 食物</div>`;
+        html += `<div class="bag-list">`;
+        let foodCount = 0;
         for (const [key, count] of Object.entries(bag.foods || {})) {
             if (count <= 0 || !FOODS[key]) continue;
+            foodCount++;
             const f = FOODS[key];
-            // 非裝備道具：顯示介紹 + 功能（回復量）
             const effectText = `效果：${f.hp ? `❤️+${f.hp}` : ""}${(f.hp && f.mp) ? " " : ""}${f.mp ? `💙+${f.mp}` : ""}`.trim();
-            html += `${f.icon} ${f.name} x${count} <span class="bag-meta">${effectText}</span>
-            <button onclick="useFood('${key}')" title="${f.desc}\n${effectText}">使用</button>
-            <button onclick="dropItem('food','${key}')" title="丟棄">丢弃</button><br>`;
+            const meta = `${effectText}\n${f.desc || ""}`.trim();
+            html += `
+                <div class="bag-item">
+                    <div>
+                        <div class="bag-item__name">${f.icon} ${f.name} x${count}</div>
+                        <div class="bag-item__meta">${meta}</div>
+                    </div>
+                    <div class="bag-item__actions">
+                        <button class="ui-btn" onclick="useFood('${key}')" title="${f.desc}\n${effectText}">使用</button>
+                        <button class="ui-btn ui-btn--ghost" onclick="dropItem('food','${key}')" title="丟棄">丢弃</button>
+                    </div>
+                </div>
+            `;
         }
+        if (foodCount === 0) {
+            html += `<div style="opacity:0.85;">（沒有食物）</div>`;
+        }
+        html += `</div></div>`;
 
-        // 装备（左右手清晰区分） + 篩選
-        html += `<br>📌 装备（右手=武器/左手=盾牌）：<br>`;
+        // 装备（卡片化 + 篩選）
+        html += `<div class="bag-section">`;
+        html += `<div class="bag-section__title">📌 裝備（右手=武器 / 左手=盾牌）</div>`;
+        html += `<div class="bag-list">`;
         const equips = bag.equipments || [];
         const f = uiState.bagEquipFilter;
         const filteredIdxs = [];
@@ -1392,30 +1885,65 @@ function renderBag() {
         }
 
         if (filteredIdxs.length === 0) {
-            html += `<div style="opacity:0.85; margin:6px 0;">（沒有符合條件的裝備）</div>`;
+            html += `<div style="opacity:0.85;">（沒有符合條件的裝備）</div>`;
         } else {
             filteredIdxs.forEach((idx) => {
                 const item = equips[idx];
-                const slotType = item.type === "rightHand" ? "右手" : item.type === "leftHand" ? "左手" : item.type;
+                const slotType = item.type === "rightHand" ? "右手" : item.type === "leftHand" ? "左手" : (SLOT_LABELS[getSlotGroup(item.type)] || item.type);
                 const icon = getEquipIcon(item);
                 const desc = getEquipDesc(item);
                 const statsText = `⚔️+${item.str || 0} 🛡️+${item.def || 0} ❤️+${item.hp || 0} 💙+${item.mp || 0}`;
-                const setTag = item.setId ? ` <span class="bag-meta">[${getSetName(item.setId)}]</span>` : "";
-                html += `${icon} ${item.name}[+${item.level || 1}] ${slotType}${setTag} <span class="bag-meta">${statsText}</span>
-                <button onclick="equipItem(${idx})" title="${desc}\n${statsText}">穿戴</button>
-                <button onclick="dropItem('equip',${idx})" title="丟棄">丢弃</button><br>`;
+                const specialText = getItemSpecialEffectText(item);
+                const setName = item.setId ? getSetName(item.setId) : "";
+                const title = `${desc}\n${statsText}${specialText ? `\n\n${specialText}` : ""}`;
+                const metaLines = [
+                    `部位：${slotType}${setName ? ` / 套裝：${setName}` : ""}`,
+                    statsText,
+                    specialText
+                ].filter(Boolean).join("\n");
+
+                html += `
+                    <div class="bag-item">
+                        <div>
+                            <div class="bag-item__name">${icon} ${item.name} [+${item.level || 1}]</div>
+                            <div class="bag-item__meta">${metaLines}</div>
+                        </div>
+                        <div class="bag-item__actions">
+                            <button class="ui-btn" onclick="equipItem(${idx})" title="${title}">穿戴</button>
+                            <button class="ui-btn ui-btn--ghost" onclick="dropItem('equip',${idx})" title="丟棄">丢弃</button>
+                        </div>
+                    </div>
+                `;
             });
         }
+        html += `</div></div>`;
 
-        // 素材
-        html += `<br>📌 素材：<br>`;
+        // 素材（卡片化）
+        html += `<div class="bag-section">`;
+        html += `<div class="bag-section__title">📌 素材</div>`;
+        html += `<div class="bag-list">`;
+        let matCount = 0;
         for (const [key, count] of Object.entries(bag.materials || {})) {
             if (count <= 0 || !MATERIALS[key]) continue;
+            matCount++;
             const m = MATERIALS[key];
-            // 素材：顯示介紹與用途（以 desc 為主）
-            html += `${m.icon} ${m.name} x${count} <span class="bag-meta">${m.desc}</span>
-            <button onclick="dropItem('mat','${key}')" title="${m.desc}\n(丟棄)">丢弃</button><br>`;
+            const meta = (m.desc || "").trim();
+            html += `
+                <div class="bag-item">
+                    <div>
+                        <div class="bag-item__name">${m.icon} ${m.name} x${count}</div>
+                        <div class="bag-item__meta">${meta}</div>
+                    </div>
+                    <div class="bag-item__actions">
+                        <button class="ui-btn ui-btn--ghost" onclick="dropItem('mat','${key}')" title="${m.desc}\n(丟棄)">丢弃</button>
+                    </div>
+                </div>
+            `;
         }
+        if (matCount === 0) {
+            html += `<div style="opacity:0.85;">（沒有素材）</div>`;
+        }
+        html += `</div></div>`;
 
         container.innerHTML = html;
     } catch (e) {
@@ -1542,13 +2070,14 @@ document.getElementById("gather-btn")?.addEventListener("click", () => {
         let mat = materials[Math.floor(Math.random() * materials.length)];
         let count = Math.floor(Math.random() * 3) + 1;
 
-        // 飾品採集事件（可改 mat / count）
-        const ctx = triggerAccessoryEvent("gather", {
+        // 飾品/套裝：採集事件（可改 mat / count）
+        let ctx = triggerAccessoryEvent("gather", {
             area,
             mat,
             count,
             toastSuffix: ""
         });
+        ctx = triggerSetEvent("gather", ctx);
         mat = ctx.mat;
         count = ctx.count;
 
@@ -1572,9 +2101,11 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
         const totalStats = calculateTotalStats();
         const battleInfo = document.getElementById("battle-info");
 
-        // 飾品：戰鬥開始事件
+        // 飾品/套裝：戰鬥開始事件
         const logLines = [];
-        triggerAccessoryEvent("battleStart", { mode: "field", char, total: totalStats, enemy, logLines });
+        const startCtx = { mode: "field", char, total: totalStats, enemy, logLines };
+        triggerAccessoryEvent("battleStart", startCtx);
+        triggerSetEvent("battleStart", startCtx);
 
         let log = `🎯 遭遇【${enemy.icon || ""} ${enemy.name}】！\n${enemy.desc || ""}`;
         if (logLines.length) log += `\n${logLines.join("\n")}`;
@@ -1584,12 +2115,15 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
         while (char.hp > 0 && enemy.hp > 0) {
             await new Promise(resolve => setTimeout(resolve, 800));
 
-            // 玩家出手：可被飾品改寫 damage
+            // 玩家出手：可被飾品/套裝改寫 damage
             const playerCtx = { mode: "field", char, total: totalStats, enemy, damage: Math.max(1, totalStats.str - enemy.def), logLines: [] };
             triggerAccessoryEvent("beforePlayerAttack", playerCtx);
+            triggerSetEvent("beforePlayerAttack", playerCtx);
             const playerDmg = Math.max(1, Math.floor(playerCtx.damage || 1));
             enemy.hp -= playerDmg;
-            triggerAccessoryEvent("afterPlayerAttack", { mode: "field", char, total: totalStats, enemy, damageDealt: playerDmg, logLines: playerCtx.logLines });
+            const afterPlayerCtx = { mode: "field", char, total: totalStats, enemy, damageDealt: playerDmg, logLines: playerCtx.logLines };
+            triggerAccessoryEvent("afterPlayerAttack", afterPlayerCtx);
+            triggerSetEvent("afterPlayerAttack", afterPlayerCtx);
             log += `\n你造成${playerDmg}点伤害`;
             if (playerCtx.logLines.length) log += `\n${playerCtx.logLines.join("\n")}`;
             if (enemy.hp > 0) {
@@ -1597,6 +2131,7 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
                 const baseEnemyDmg = Math.max(1, enemy.str - totalStats.def);
                 const enemyCtx = { mode: "field", char, total: totalStats, enemy, damage: baseEnemyDmg, logLines: [] };
                 triggerAccessoryEvent("beforeEnemyAttack", enemyCtx);
+                triggerSetEvent("beforeEnemyAttack", enemyCtx);
                 let enemyDmg = Math.max(0, Math.floor(enemyCtx.damage || 0));
 
                 // 護盾吸收
@@ -1607,7 +2142,9 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
                     enemyCtx.logLines.push(addBattleLogLine(`🛡️ 護盾吸收 ${absorb} 伤害（剩余护盾 ${char.__shield}）`));
                 }
                 char.hp -= enemyDmg;
-                triggerAccessoryEvent("afterEnemyAttack", { mode: "field", char, total: totalStats, enemy, damageDealt: enemyDmg, logLines: enemyCtx.logLines });
+                const afterEnemyCtx = { mode: "field", char, total: totalStats, enemy, damageDealt: enemyDmg, logLines: enemyCtx.logLines };
+                triggerAccessoryEvent("afterEnemyAttack", afterEnemyCtx);
+                triggerSetEvent("afterEnemyAttack", afterEnemyCtx);
                 log += `\n${enemy.name}造成${enemyDmg}点伤害`;
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
@@ -1622,7 +2159,9 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
             // 勝利事件：允許飾品追加掉落/回復等
             const drops = { ...(enemy.drop || {}) };
             const victoryLines = [];
-            triggerAccessoryEvent("victory", { mode: "field", char, total: totalStats, enemy, drops, logLines: victoryLines });
+            const victoryCtx = { mode: "field", char, total: totalStats, enemy, drops, logLines: victoryLines };
+            triggerAccessoryEvent("victory", victoryCtx);
+            triggerSetEvent("victory", victoryCtx);
 
             log += `\n🎉 胜利！获得${enemy.exp}经验`;
             char.exp += enemy.exp;
@@ -1820,22 +2359,22 @@ function renderForge() {
         for (const it of list) {
             const { id, recipe, equip } = it;
             const slotLabel = SLOT_LABELS[getSlotGroup(equip.type)] || (equip.type || "");
-            let matText = "";
+            let matHtml = "";
             for (const mat in recipe.materials) {
                 const have = gameData.bag.materials[mat] || 0;
                 const need = recipe.materials[mat];
                 const m = MATERIALS[mat];
-                if (m) matText += `${m.icon} ${m.name}:${have}/${need} `;
-                else matText += `❓${mat}:${have}/${need} `;
+                const label = m ? `${m.icon} ${m.name}` : `❓${mat}`;
+                matHtml += `<span class="mat">${label}: ${have}/${need}</span>`;
             }
             const canForge = isForgeRecipeCraftable(recipe);
             html += `
                 <div class="beauty-card compact">
                     <h3>${equip.icon} ${equip.name} <small>(${slotLabel} / 配方Lv.${recipe.level})</small></h3>
                     <p class="item-desc">${equip.desc}</p>
-                    <p>属性：⚔️力量+${equip.str} 🛡️防御+${equip.def} ❤️生命+${equip.hp} 💙魔力+${equip.mp}</p>
-                    <p>${matText}</p>
-                    <button ${canForge ? "" : "disabled"} onclick="forgeItem('${id}')">锻造</button>
+                    <div class="forge-stats">属性：⚔️力量+${equip.str} 🛡️防御+${equip.def} ❤️生命+${equip.hp} 💙魔力+${equip.mp}</div>
+                    <div class="forge-mats">消耗材料：${matHtml}</div>
+                    <button class="ui-btn" ${canForge ? "" : "disabled"} onclick="forgeItem('${id}')">锻造</button>
                 </div>
             `;
         }

@@ -105,6 +105,39 @@ body {
     cursor: pointer;
 }
 
+/* 統一按鈕基礎樣式（背包/鍛造/製作/強化共用） */
+.ui-btn {
+    padding: 8px 16px;
+    background: #e94560;
+    border: none;
+    color: #fff;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: transform 0.12s ease, background 0.2s ease, opacity 0.2s ease;
+}
+
+.ui-btn:hover {
+    background: #ff5c77;
+    transform: translateY(-1px);
+}
+
+.ui-btn:disabled {
+    background: #666;
+    cursor: not-allowed;
+    opacity: 0.7;
+    transform: none;
+}
+
+.ui-btn--ghost {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,0.18);
+    color: rgba(255,255,255,0.92);
+}
+
+.ui-btn--ghost:hover {
+    background: rgba(255,255,255,0.06);
+}
+
 .battle-log, .record-list {
     height: 300px;
     overflow-y: auto;
@@ -266,6 +299,83 @@ body {
     font-size: 12px;
     margin-left: 6px;
     opacity: 0.9;
+}
+
+/* 背包：將清單改成更一致的卡片式排版 */
+.bag-section {
+    margin-top: 12px;
+}
+
+.bag-section__title {
+    margin: 10px 0 8px;
+    font-weight: 700;
+    color: #e94560;
+}
+
+.bag-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 10px;
+}
+
+.bag-item {
+    background: rgba(15, 52, 96, 0.72);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 10px;
+    padding: 10px 10px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    align-items: start;
+}
+
+.bag-item__name {
+    font-weight: 700;
+    line-height: 1.25;
+}
+
+.bag-item__meta {
+    margin-top: 6px;
+    font-size: 12px;
+    opacity: 0.92;
+    color: #c9d1ff;
+    white-space: pre-line;
+}
+
+.bag-item__actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+/* 鍛造：材料字體小一點 + 屬性/材料分區 */
+.forge-stats {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.16);
+    border: 1px solid rgba(255,255,255,0.08);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.forge-mats {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(0,0,0,0.12);
+    border: 1px dashed rgba(255,255,255,0.12);
+    font-size: 12px; /* 需求：材料字體稍小 */
+    opacity: 0.92;
+    line-height: 1.45;
+}
+
+.forge-mats .mat {
+    display: inline-block;
+    margin-right: 10px;
+    margin-bottom: 4px;
+    white-space: nowrap;
 }
 
 /* 懸浮提示框 */
