@@ -27,6 +27,67 @@ function pct(n, d) {
     return clamp((Number(n) || 0) / dn, 0, 1);
 }
 
+// ========================== 戰鬥詳細內容：色彩增強格式化 ==========================
+function formatBattleDetailHtml(log) {
+    if (!log) return "";
+    const lines = log.split("\n");
+    const htmlLines = lines.map(line => {
+        let cssClass = "battle-detail-line--info";
+        let formatted = line;
+
+        // 判斷行類型
+        if (/^你造成/.test(line) || /^你/.test(line) && /造成.*伤害/.test(line)) {
+            cssClass = "battle-detail-line--player";
+        } else if (/造成.*伤害/.test(line) && !/^你/.test(line)) {
+            cssClass = "battle-detail-line--enemy";
+        } else if (/^🎉|^🏆|胜利|通關|通关/.test(line)) {
+            cssClass = "battle-detail-line--victory";
+        } else if (/^💀|击败|失敗|失败/.test(line)) {
+            cssClass = "battle-detail-line--defeat";
+        } else if (/🛡️|護盾|护盾/.test(line)) {
+            cssClass = "battle-detail-line--shield";
+        } else if (/获得|掉落|獲得/.test(line) && !/经验/.test(line)) {
+            cssClass = "battle-detail-line--drop";
+        } else if (/^🎯|^🏰|^👑|遭遇/.test(line)) {
+            cssClass = "battle-detail-line--info";
+        } else if (/经验/.test(line)) {
+            cssClass = "battle-detail-line--victory";
+        } else if (/✨|⚡|🔥|❄️|💨|🌿/.test(line)) {
+            cssClass = "battle-detail-line--event";
+        }
+
+        // 數值高亮處理
+        // 傷害數值：造成XXX点伤害
+        formatted = formatted.replace(/(造成)(\d+)(点伤害)/g,
+            '$1<span class="battle-val battle-val--dmg">$2</span>$3');
+        // HP數值：(怪物HP:xxx/yyy) 或 (你的HP:xxx/yyy)
+        formatted = formatted.replace(/\((怪物HP|你的HP|BOSS HP):(\d+)\/(\d+)\)/g,
+            '(<span class="battle-val battle-val--hp">$2</span>/<span class="battle-val battle-val--hp">$3</span>)');
+        // 護盾數值
+        formatted = formatted.replace(/護盾吸收 (\d+)/g,
+            '護盾吸收 <span class="battle-val battle-val--shield">$1</span>');
+        formatted = formatted.replace(/剩余护盾 (\d+)/g,
+            '剩余护盾 <span class="battle-val battle-val--shield">$1</span>');
+        // 經驗值
+        formatted = formatted.replace(/(获得)(\d+)(经验)/g,
+            '$1<span class="battle-val battle-val--exp">$2</span>$3');
+        // 物品數量 xN
+        formatted = formatted.replace(/ x(\d+)$/g,
+            ' <span class="battle-val battle-val--item">x$1</span>');
+        formatted = formatted.replace(/ x(\d+)<br>/g,
+            ' <span class="battle-val battle-val--item">x$1</span><br>');
+
+        // 怪物名稱高亮（在敵方攻擊行）
+        if (cssClass === "battle-detail-line--enemy") {
+            formatted = formatted.replace(/^([^<]+)(造成)/,
+                '<span class="battle-entity battle-entity--enemy">$1</span>$2');
+        }
+
+        return `<div class="battle-detail-line ${cssClass}">${formatted}</div>`;
+    });
+    return htmlLines.join("");
+}
+
 function renderBattleStatus({ mode, char, total, enemy }) {
     // mode: 'field' | 'dungeon' | 'worldboss'
     const key = (mode === "dungeon") ? "dungeon" : (mode === "worldboss") ? "worldboss" : "field";
@@ -1877,7 +1938,7 @@ async function worldBossFight() {
         if (logLines.length) log += `\n${logLines.join("\n")}`;
         addWorldBossRecord(`⚔️ 開始挑戰：${enemy.icon} ${enemy.name}`);
 
-        const startHtml = log.replace(/\n/g, "<br>");
+        const startHtml = formatBattleDetailHtml(log);
         battleUIState.worldboss.lastDetailHtml = startHtml;
         if (detailEl) detailEl.innerHTML = startHtml;
         renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
@@ -1921,7 +1982,7 @@ async function worldBossFight() {
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
 
-            const stepHtml = log.replace(/\n/g, "<br>");
+            const stepHtml = formatBattleDetailHtml(log);
             battleUIState.worldboss.lastDetailHtml = stepHtml;
             if (detailEl) detailEl.innerHTML = stepHtml;
             renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
@@ -1964,7 +2025,7 @@ async function worldBossFight() {
             if (dropLines.length) log += `\n${dropLines.join("\n")}`;
         }
 
-        const finalHtml = log.replace(/\n/g, "<br>");
+        const finalHtml = formatBattleDetailHtml(log);
         battleUIState.worldboss.lastDetailHtml = finalHtml;
         if (detailEl) detailEl.innerHTML = finalHtml;
         renderBattleStatus({ mode: "worldboss", char, total: totalStats, enemy });
@@ -2183,7 +2244,7 @@ async function dungeonFight() {
         if (logLines.length) log += `\n${logLines.join("\n")}`;
         d.record.unshift(`[${new Date().toLocaleTimeString()}] ${log}`);
 
-        const startHtml = log.replace(/\n/g, "<br>");
+        const startHtml = formatBattleDetailHtml(log);
         battleUIState.dungeon.lastDetailHtml = startHtml;
         if (battleDetail) battleDetail.innerHTML = startHtml;
         renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
@@ -2225,7 +2286,7 @@ async function dungeonFight() {
                 log += `\n${enemy.name}造成${enemyDmg}点伤害（你的HP:${Math.max(0, char.hp)}/${totalStats.hpMax}）`;
                 if (enemyCtx.logLines.length) log += `\n${enemyCtx.logLines.join("\n")}`;
             }
-            const stepHtml = log.replace(/\n/g, "<br>");
+            const stepHtml = formatBattleDetailHtml(log);
             battleUIState.dungeon.lastDetailHtml = stepHtml;
             if (battleDetail) battleDetail.innerHTML = stepHtml;
             renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
@@ -2276,7 +2337,7 @@ async function dungeonFight() {
             d.record.unshift(`[${new Date().toLocaleTimeString()}] ✅ 通关第${floor}层 → 前往第${d.floor}层`);
         }
 
-        const finalHtml = log.replace(/\n/g, "<br>");
+        const finalHtml = formatBattleDetailHtml(log);
         battleUIState.dungeon.lastDetailHtml = finalHtml;
         if (battleDetail) battleDetail.innerHTML = finalHtml;
         renderBattleStatus({ mode: "dungeon", char, total: totalStats, enemy });
@@ -2786,7 +2847,7 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
         if (logLines.length) log += `\n${logLines.join("\n")}`;
 
         // 只把戰鬥的「詳細內容」放進 detail 區塊；battle-info 仍顯示區域資訊
-        const detailHtml = log.replace(/\n/g, "<br>");
+        const detailHtml = formatBattleDetailHtml(log);
         battleUIState.field.lastDetailHtml = detailHtml;
         if (battleDetail) battleDetail.innerHTML = detailHtml;
         renderBattleStatus({ mode: "field", char, total: totalStats, enemy });
@@ -2829,7 +2890,7 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
             }
 
             // 更新狀態 + 詳細內容（不動 battle-info）
-            const stepHtml = log.replace(/\n/g, "<br>");
+            const stepHtml = formatBattleDetailHtml(log);
             battleUIState.field.lastDetailHtml = stepHtml;
             if (battleDetail) battleDetail.innerHTML = stepHtml;
             renderBattleStatus({ mode: "field", char, total: totalStats, enemy });
@@ -2862,7 +2923,7 @@ document.getElementById("battle-btn")?.addEventListener("click", async () => {
         // 戰鬥紀錄：只記最後一行結果（勝利/戰敗/最後事件）
         gameData.battleRecord.push(`[${new Date().toLocaleTimeString()}] ${log.split("\n").pop()}`);
 
-        const finalHtml = log.replace(/\n/g, "<br>");
+        const finalHtml = formatBattleDetailHtml(log);
         battleUIState.field.lastDetailHtml = finalHtml;
         if (battleDetail) battleDetail.innerHTML = finalHtml;
         renderBattleStatus({ mode: "field", char, total: totalStats, enemy });

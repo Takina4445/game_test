@@ -550,3 +550,104 @@ body {
 #battle-info {
     white-space: pre-wrap;   /* 或 pre-line */
 }
+
+/* ===================== 戰鬥詳細內容：色彩增強 ===================== */
+.battle-detail-line {
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 6px;
+    line-height: 1.6;
+    font-size: 13px;
+    border-left: 3px solid transparent;
+}
+
+.battle-detail-line--player {
+    background: rgba(46, 204, 113, 0.12);
+    border-left-color: #2ecc71;
+}
+
+.battle-detail-line--enemy {
+    background: rgba(231, 76, 60, 0.12);
+    border-left-color: #e74c3c;
+}
+
+.battle-detail-line--info {
+    background: rgba(52, 152, 219, 0.10);
+    border-left-color: #3498db;
+}
+
+.battle-detail-line--victory {
+    background: rgba(241, 196, 15, 0.15);
+    border-left-color: #f1c40f;
+}
+
+.battle-detail-line--defeat {
+    background: rgba(192, 57, 43, 0.18);
+    border-left-color: #c0392b;
+}
+
+.battle-detail-line--shield {
+    background: rgba(155, 89, 182, 0.12);
+    border-left-color: #9b59b6;
+}
+
+.battle-detail-line--drop {
+    background: rgba(26, 188, 156, 0.10);
+    border-left-color: #1abc9c;
+}
+
+.battle-detail-line--event {
+    background: rgba(230, 126, 34, 0.10);
+    border-left-color: #e67e22;
+}
+
+/* 數值高亮 */
+.battle-val {
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.battle-val--dmg {
+    color: #ff6b6b;
+    background: rgba(255, 107, 107, 0.15);
+}
+
+.battle-val--heal {
+    color: #2ecc71;
+    background: rgba(46, 204, 113, 0.15);
+}
+
+.battle-val--hp {
+    color: #f39c12;
+    background: rgba(243, 156, 18, 0.12);
+}
+
+.battle-val--exp {
+    color: #9b59b6;
+    background: rgba(155, 89, 182, 0.15);
+}
+
+.battle-val--shield {
+    color: #8e44ad;
+    background: rgba(142, 68, 173, 0.15);
+}
+
+.battle-val--item {
+    color: #1abc9c;
+    background: rgba(26, 188, 156, 0.12);
+}
+
+/* 怪物/玩家名稱標籤 */
+.battle-entity {
+    font-weight: 700;
+}
+
+.battle-entity--player {
+    color: #5dade2;
+}
+
+.battle-entity--enemy {
+    color: #e74c3c;
+}
