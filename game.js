@@ -2079,8 +2079,18 @@ function showToast(msg) {
     const toast = document.getElementById("toast");
     if (!toast) return;
     toast.textContent = msg;
-    toast.classList.add("show");
-    setTimeout(() => toast.classList.remove("show"), 2000);
+    // 根據訊息前綴設定樣式變體
+    let variant = "";
+    const m = String(msg || "");
+    if (/^[✅🎉🏆✨⚒️]/.test(m)) {
+        variant = "toast--success";
+    } else if (/^[❌💀]/.test(m)) {
+        variant = "toast--error";
+    } else if (/^[🌿🔄🎽🗑️]/.test(m)) {
+        variant = "toast--info";
+    }
+    toast.className = "toast show" + (variant ? " " + variant : "");
+    setTimeout(() => { toast.classList.remove("show"); }, 2000);
 }
 
 function renderAll() {
@@ -2441,23 +2451,36 @@ function renderRole() {
     }
 
     const setText = (setBonus.active.length > 0 || specialLines.length > 0)
-        ? `<div style="margin-top:10px;"><strong>🧩 套裝效果</strong><br>${[
+        ? `<div class="role-set-bonus"><strong>🧩 套裝效果</strong><br>${[
             ...setBonus.active.map(s => `- ${s}`),
             ...(specialLines.length ? ["<span style=\"opacity:0.9;\">特殊效果：</span>"] : []),
             ...specialLines.map(s => `- ${s}`)
         ].join("<br>")}</div>`
-        : `<div style="margin-top:10px; opacity:0.85;"><strong>🧩 套裝效果</strong><br>（尚未啟用）</div>`;
+        : `<div class="role-set-bonus"><strong>🧩 套裝效果</strong><br>（尚未啟用）</div>`;
+    const hpPct = Math.round(pct(Math.min(char.hp || 0, totalStats.hpMax), totalStats.hpMax) * 100);
+    const mpPct = Math.round(pct(Math.min(char.mp || 0, totalStats.mpMax), totalStats.mpMax) * 100);
+    const expPct = Math.round(pct(char.exp || 0, char.expMax || 100) * 100);
+    const forgePct = Math.round(pct(char.forgeExp || 0, char.forgeExpMax || 50) * 100);
     container.innerHTML = `
         <div>等级：Lv.${char.level || 1}</div>
-        <div>经验：${char.exp || 0}/${char.expMax || 100}</div>
-        <div>体力：${Math.min(char.hp || 0, totalStats.hpMax)}/${totalStats.hpMax}</div>
-        <div>魔力：${Math.min(char.mp || 0, totalStats.mpMax)}/${totalStats.mpMax}</div>
-        <div>力量：${totalStats.str}</div>
-        <div>敏捷：${totalStats.dex}</div>
-        <div>技巧：${totalStats.tec}</div>
-        <div>防御：${totalStats.def}</div>
-        <div>魔力：${totalStats.mag}</div>
-        <div>锻造等级：Lv.${char.forgeLevel || 1}</div>
+        <div class="stat-bar">
+            <div class="stat-bar__label"><span>❤️ 体力</span><span>${Math.min(char.hp || 0, totalStats.hpMax)}/${totalStats.hpMax}</span></div>
+            <div class="stat-bar__track"><div class="stat-bar__fill stat-bar__fill--hp" style="width:${hpPct}%"></div></div>
+        </div>
+        <div class="stat-bar">
+            <div class="stat-bar__label"><span>💙 魔力</span><span>${Math.min(char.mp || 0, totalStats.mpMax)}/${totalStats.mpMax}</span></div>
+            <div class="stat-bar__track"><div class="stat-bar__fill stat-bar__fill--mp" style="width:${mpPct}%"></div></div>
+        </div>
+        <div class="stat-bar">
+            <div class="stat-bar__label"><span>⭐ 经验</span><span>${char.exp || 0}/${char.expMax || 100}</span></div>
+            <div class="stat-bar__track"><div class="stat-bar__fill stat-bar__fill--exp" style="width:${expPct}%"></div></div>
+        </div>
+        <div>力量：${totalStats.str}　敏捷：${totalStats.dex}　技巧：${totalStats.tec}</div>
+        <div>防御：${totalStats.def}　魔力：${totalStats.mag}</div>
+        <div class="stat-bar">
+            <div class="stat-bar__label"><span>⚒️ 锻造</span><span>Lv.${char.forgeLevel || 1} (${char.forgeExp || 0}/${char.forgeExpMax || 50})</span></div>
+            <div class="stat-bar__track"><div class="stat-bar__fill stat-bar__fill--forge" style="width:${forgePct}%"></div></div>
+        </div>
         ${setText}
     `;
 }
